@@ -1,4 +1,4 @@
-const API_BASE = "https://script.google.com/macros/s/AKfycbzFhs7W99H2Q5jNhEnAMKM01zLlW4uarrBxwW4GshhSeVDkBxr14rKPdkjPHsEOxV1h/exec";
+const API_BASE = "https://script.google.com/macros/s/AKfycbwpj7LxlHBAXWtah7iqWcKx5YE6VhYE3EKjtg0v16HSmvMEzBNkk1VUEmQKusibOh6g4w/exec";
 
 const STORE = {
   USER_EMAIL: "dfp_user_email",

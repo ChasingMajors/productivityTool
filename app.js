@@ -38,6 +38,7 @@ signOutBtn.addEventListener("click", () => {
   state.historyBundles = [];
   state.activeTab = "today";
 
+  disableNavForLoggedOut();
   updateNav();
   renderLogin();
 });
@@ -66,7 +67,7 @@ async function boot() {
     setLoading("Loading your planner...");
     await ensureUser(email, name || "");
     await refreshAllData();
-    setActiveTab(state.activeTab || "today");
+    if (!state.activeTab) setActiveTab("today");
     renderActiveTab();
   } catch (err) {
     renderError(err.message || "Could not load the app.");
@@ -113,8 +114,8 @@ function renderLogin() {
       await ensureUser(email, name);
       localStorage.setItem(STORE.USER_EMAIL, email);
       localStorage.setItem(STORE.USER_NAME, name || "");
-      await refreshAllData();
       setActiveTab("today");
+      await refreshAllData();
       renderActiveTab();
     } catch (err) {
       renderError(err.message || "Could not sign in.");
@@ -181,7 +182,7 @@ async function loadHistory() {
   );
 
   state.historyBundles = bundles
-    .filter(b => b.ok && b.has_plan)
+    .filter(bundle => bundle.ok && bundle.has_plan)
     .sort((a, b) => String(b.plan_date).localeCompare(String(a.plan_date)));
 }
 
@@ -239,10 +240,10 @@ function renderActiveTab() {
 ========================= */
 
 function renderTodayTab() {
-  const bundle = state.todayBundle;
+  const todayBundle = state.todayBundle;
   const tomorrowBundle = state.tomorrowBundle;
 
-  if (!bundle?.has_plan) {
+  if (!todayBundle?.has_plan) {
     mainView.innerHTML = `
       <section class="card hero">
         <div class="eyebrow">Today</div>
@@ -252,7 +253,7 @@ function renderTodayTab() {
 
       <section class="card">
         <h3>Next step</h3>
-        <p class="muted">Use the Plan tab to build tomorrow’s deep focus list.</p>
+        <p class="muted">Use the Plan tab to build or edit tomorrow’s deep focus list.</p>
         <div class="sp16"></div>
         <button id="goPlanBtn" class="btn primary full" type="button">Go to Plan</button>
       </section>
@@ -279,9 +280,9 @@ function renderTodayTab() {
     return;
   }
 
-  const tasks = bundle.tasks || [];
-  const current = bundle.current_task;
-  const completedCount = tasks.filter(t => toBool(t.completed)).length;
+  const tasks = todayBundle.tasks || [];
+  const current = todayBundle.current_task;
+  const completedCount = tasks.filter(task => toBool(task.completed)).length;
 
   mainView.innerHTML = `
     <section class="card hero">
@@ -334,48 +335,47 @@ function renderPlanTab() {
   const tomorrowBundle = state.tomorrowBundle;
 
   if (tomorrowBundle?.has_plan) {
-    mainView.innerHTML = `
-      <section class="card hero">
-        <div class="eyebrow">Plan</div>
-        <h2>Tomorrow is already planned</h2>
-        <p class="muted">Date: ${escapeHtml(tomorrowBundle.plan_date)}</p>
-      </section>
-
-      <section class="card">
-        <h3>Tomorrow’s priorities</h3>
-        ${(tomorrowBundle.tasks || []).map(task => `
-          <div class="task-item">
-            <div class="rank">${escapeHtml(String(task.task_rank))}</div>
-            <div class="task-copy">${escapeHtml(task.task_text || "")}</div>
-          </div>
-        `).join("")}
-
-        <div class="sp16"></div>
-        <div class="row stack-mobile">
-          <button id="replacePlanBtn" class="btn secondary" type="button">Replace Plan</button>
-          <button id="refreshPlanBtn" class="btn primary" type="button">Refresh</button>
-        </div>
-      </section>
-    `;
-
-    document.getElementById("replacePlanBtn").addEventListener("click", () => {
-      renderPlanningGate(true);
-    });
-
-    document.getElementById("refreshPlanBtn").addEventListener("click", async () => {
-      try {
-        setLoading("Refreshing...");
-        await refreshAllData();
-        renderPlanTab();
-      } catch (err) {
-        renderError(err.message || "Could not refresh.");
-      }
-    });
-
+    renderTomorrowPlanView();
     return;
   }
 
   renderPlanningGate(false);
+}
+
+function renderTomorrowPlanView() {
+  const tomorrowBundle = state.tomorrowBundle;
+
+  mainView.innerHTML = `
+    <section class="card hero">
+      <div class="eyebrow">Plan</div>
+      <h2>Tomorrow is already planned</h2>
+      <p class="muted">Date: ${escapeHtml(tomorrowBundle.plan_date)}</p>
+    </section>
+
+    <section class="card">
+      <h3>Tomorrow’s priorities</h3>
+      ${(tomorrowBundle.tasks || []).map(task => `
+        <div class="task-item">
+          <div class="rank">${escapeHtml(String(task.task_rank))}</div>
+          <div class="task-copy">${escapeHtml(task.task_text || "")}</div>
+        </div>
+      `).join("")}
+
+      <div class="sp16"></div>
+      <div class="row stack-mobile">
+        <button id="editPlanBtn" class="btn primary" type="button">Edit Plan</button>
+        <button id="replacePlanBtn" class="btn secondary" type="button">Replace Plan</button>
+      </div>
+    </section>
+  `;
+
+  document.getElementById("editPlanBtn").addEventListener("click", () => {
+    renderEditTomorrowPlanForm();
+  });
+
+  document.getElementById("replacePlanBtn").addEventListener("click", () => {
+    renderPlanningGate(true);
+  });
 }
 
 function renderPlanningGate(isReplacing) {
@@ -558,6 +558,73 @@ function renderPlanForm(prefilledTasks) {
   });
 }
 
+function renderEditTomorrowPlanForm() {
+  const tomorrowBundle = state.tomorrowBundle;
+  const tasks = tomorrowBundle?.tasks || [];
+
+  mainView.innerHTML = `
+    <section class="card hero">
+      <div class="eyebrow">Edit Plan</div>
+      <h2>Edit tomorrow’s priorities</h2>
+      <p class="muted">Date: ${escapeHtml(tomorrowBundle.plan_date)}</p>
+    </section>
+
+    <section class="card">
+      ${tasks.map((task, idx) => `
+        <div class="sp12"></div>
+        <div class="label">Priority ${idx + 1}</div>
+        <input class="input editTaskInput" data-rank="${idx + 1}" type="text" value="${escapeAttr(task.task_text || "")}" />
+      `).join("")}
+
+      <div class="sp16"></div>
+      <div class="row stack-mobile">
+        <button id="saveEditedPlanBtn" class="btn success" type="button">Save Changes</button>
+        <button id="cancelEditPlanBtn" class="btn secondary" type="button">Cancel</button>
+      </div>
+    </section>
+  `;
+
+  document.getElementById("saveEditedPlanBtn").addEventListener("click", async () => {
+    const editedValues = [...document.querySelectorAll(".editTaskInput")]
+      .map(el => el.value.trim());
+
+    if (editedValues.some(v => !v) || editedValues.length !== 6) {
+      alert("All 6 priorities must be filled out.");
+      return;
+    }
+
+    const finalTasks = editedValues.map((text, idx) => ({
+      task_text: text,
+      carried_over: toBool(tasks[idx]?.carried_over),
+      visibility: tasks[idx]?.visibility || "private",
+      shared_with: tasks[idx]?.shared_with || "",
+      notes: tasks[idx]?.notes || ""
+    }));
+
+    try {
+      setLoading("Saving plan changes...");
+      const res = await apiPost("saveNextDayPlan", {
+        email: state.user.email,
+        plan_date: tomorrowBundle.plan_date,
+        source_plan_id: state.previousBundle?.plan?.plan_id || "",
+        tasks: finalTasks
+      });
+
+      if (!res.ok) throw new Error(res.error || "Could not save changes.");
+
+      await refreshAllData();
+      setActiveTab("plan");
+      renderActiveTab();
+    } catch (err) {
+      renderError(err.message || "Could not save plan changes.");
+    }
+  });
+
+  document.getElementById("cancelEditPlanBtn").addEventListener("click", () => {
+    renderTomorrowPlanView();
+  });
+}
+
 /* =========================
    HISTORY TAB
 ========================= */
@@ -585,7 +652,7 @@ function renderHistoryTab() {
 
     <section class="card">
       ${bundles.map((bundle, idx) => {
-        const completedCount = (bundle.tasks || []).filter(t => toBool(t.completed)).length;
+        const completedCount = (bundle.tasks || []).filter(task => toBool(task.completed)).length;
         return `
           <div class="task-item" style="cursor:pointer;" data-history-index="${idx}">
             <div class="rank">${completedCount}</div>
@@ -608,7 +675,7 @@ function renderHistoryTab() {
 }
 
 function renderHistoryDetail(bundle) {
-  const completedCount = (bundle.tasks || []).filter(t => toBool(t.completed)).length;
+  const completedCount = (bundle.tasks || []).filter(task => toBool(task.completed)).length;
 
   mainView.innerHTML = `
     <section class="card hero">

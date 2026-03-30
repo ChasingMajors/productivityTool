@@ -246,8 +246,10 @@ function renderActiveTab() {
 function renderTodayTab() {
   const todayBundle = state.todayBundle;
   const tomorrowBundle = state.tomorrowBundle;
+  const todayHasPlan = !!todayBundle?.has_plan;
+  const tomorrowHasPlan = !!tomorrowBundle?.has_plan;
 
-  if (!todayBundle?.has_plan) {
+  if (!todayHasPlan) {
     mainView.innerHTML = `
       <section class="card hero">
         <div class="eyebrow">Today</div>
@@ -256,16 +258,19 @@ function renderTodayTab() {
       </section>
 
       <section class="card">
-        <h3>Next step</h3>
-        <p class="muted">Use the Plan tab to build or edit tomorrow’s deep focus list.</p>
+        <h3>Status</h3>
+        <div class="sp12"></div>
+        <div class="badge">${tomorrowHasPlan ? "Tomorrow is already planned" : "Tomorrow is not planned yet"}</div>
         <div class="sp16"></div>
-        <button id="goPlanBtn" class="btn primary full" type="button">Go to Plan</button>
+        <div class="row stack-mobile">
+          <button id="goPlanBtn" class="btn primary" type="button">${tomorrowHasPlan ? "Open Tomorrow’s Plan" : "Plan Tomorrow"}</button>
+          ${tomorrowHasPlan ? `<button id="editTomorrowBtn" class="btn secondary" type="button">Edit Tomorrow</button>` : ""}
+        </div>
       </section>
 
-      ${tomorrowBundle?.has_plan ? `
+      ${tomorrowHasPlan ? `
         <section class="card">
-          <div class="badge">Tomorrow is planned</div>
-          <div class="sp12"></div>
+          <h3>Tomorrow preview</h3>
           ${(tomorrowBundle.tasks || []).map(task => `
             <div class="task-item">
               <div class="rank">${escapeHtml(String(task.task_rank))}</div>
@@ -281,25 +286,46 @@ function renderTodayTab() {
       renderActiveTab();
     });
 
+    const editTomorrowBtn = document.getElementById("editTomorrowBtn");
+    if (editTomorrowBtn) {
+      editTomorrowBtn.addEventListener("click", () => {
+        setActiveTab("plan");
+        renderActiveTab();
+      });
+    }
+
     return;
   }
 
   const tasks = todayBundle.tasks || [];
   const current = todayBundle.current_task;
   const completedCount = tasks.filter(task => toBool(task.completed)).length;
+  const allComplete = completedCount === 6;
 
   mainView.innerHTML = `
     <section class="card hero">
       <div class="eyebrow">Today’s Focus</div>
-      <h2>${current ? `Priority ${escapeHtml(String(current.task_rank))}` : "All priorities complete"}</h2>
-      <p class="big">${current ? escapeHtml(current.task_text || "") : "You completed all six priorities."}</p>
+      <h2>${allComplete ? "All priorities complete" : `Priority ${escapeHtml(String(current?.task_rank || ""))}`}</h2>
+      <p class="big">${allComplete ? "You completed all six priorities for today." : escapeHtml(current?.task_text || "")}</p>
       <div class="kpi">${completedCount} of 6 complete</div>
 
-      ${current ? `
+      ${!allComplete && current ? `
         <div class="sp16"></div>
         <button id="completeCurrentBtn" class="btn success full" type="button">Mark Complete</button>
       ` : ""}
     </section>
+
+    ${allComplete ? `
+      <section class="card">
+        <h3>Nice work</h3>
+        <p class="muted">${tomorrowHasPlan ? "Tomorrow is already planned, so you’re set up for the next day." : "Now is a great time to build tomorrow’s six priorities."}</p>
+        <div class="sp16"></div>
+        <div class="row stack-mobile">
+          <button id="todayPlanTomorrowBtn" class="btn primary" type="button">${tomorrowHasPlan ? "View Tomorrow’s Plan" : "Plan Tomorrow"}</button>
+          ${tomorrowHasPlan ? `<button id="todayEditTomorrowBtn" class="btn secondary" type="button">Edit Tomorrow</button>` : ""}
+        </div>
+      </section>
+    ` : ""}
 
     <section class="card">
       <h3>Full list</h3>
@@ -313,10 +339,22 @@ function renderTodayTab() {
         </div>
       `).join("")}
     </section>
+
+    ${tomorrowHasPlan ? `
+      <section class="card">
+        <h3>Tomorrow preview</h3>
+        ${(tomorrowBundle.tasks || []).map(task => `
+          <div class="task-item">
+            <div class="rank">${escapeHtml(String(task.task_rank))}</div>
+            <div class="task-copy">${escapeHtml(task.task_text || "")}</div>
+          </div>
+        `).join("")}
+      </section>
+    ` : ""}
   `;
 
   const btn = document.getElementById("completeCurrentBtn");
-  if (btn && current) {
+  if (btn && current && !allComplete) {
     btn.addEventListener("click", async () => {
       try {
         setLoading("Updating task...");
@@ -327,6 +365,22 @@ function renderTodayTab() {
       } catch (err) {
         renderError(err.message || "Could not complete task.");
       }
+    });
+  }
+
+  const todayPlanTomorrowBtn = document.getElementById("todayPlanTomorrowBtn");
+  if (todayPlanTomorrowBtn) {
+    todayPlanTomorrowBtn.addEventListener("click", () => {
+      setActiveTab("plan");
+      renderActiveTab();
+    });
+  }
+
+  const todayEditTomorrowBtn = document.getElementById("todayEditTomorrowBtn");
+  if (todayEditTomorrowBtn) {
+    todayEditTomorrowBtn.addEventListener("click", () => {
+      setActiveTab("plan");
+      renderActiveTab();
     });
   }
 }
@@ -384,13 +438,24 @@ function renderTomorrowPlanView() {
 
 function renderPlanningGate(isReplacing) {
   const previousTasks = (state.previousBundle && state.previousBundle.tasks) ? state.previousBundle.tasks : [];
+  const todayTasks = (state.todayBundle && state.todayBundle.tasks) ? state.todayBundle.tasks : [];
   const hasPreviousPlan = !!(state.previousBundle && state.previousBundle.has_previous_plan && previousTasks.length);
+  const hasTodayPlan = !!(state.todayBundle && state.todayBundle.has_plan && todayTasks.length);
 
   mainView.innerHTML = `
     <section class="card hero">
       <div class="eyebrow">Plan</div>
       <h2>${isReplacing ? "Replace tomorrow’s six priorities" : "Set up tomorrow’s six priorities"}</h2>
-      <p class="muted">Start by deciding whether today’s work is fully complete.</p>
+      <p class="muted">Choose the fastest way to build tomorrow’s list.</p>
+    </section>
+
+    <section class="card">
+      <h3>Quick start</h3>
+      <div class="sp12"></div>
+      <div class="row stack-mobile">
+        ${hasTodayPlan ? `<button id="startFromTodayBtn" class="btn primary" type="button">Start From Today</button>` : ""}
+        <button id="startFreshBtn" class="btn secondary" type="button">Start Fresh</button>
+      </div>
     </section>
 
     <section class="card">
@@ -418,6 +483,24 @@ function renderPlanningGate(isReplacing) {
       </section>
     ` : ""}
   `;
+
+  const startFromTodayBtn = document.getElementById("startFromTodayBtn");
+  if (startFromTodayBtn) {
+    startFromTodayBtn.addEventListener("click", () => {
+      const prefilled = todayTasks.slice(0, 6).map(task => ({
+        task_text: task.task_text || "",
+        carried_over: false,
+        visibility: task.visibility || "private",
+        shared_with: task.shared_with || "",
+        notes: task.notes || ""
+      }));
+      renderEditPrefilledPlanForm(prefilled, addDays(state.todayYmd, 1));
+    });
+  }
+
+  document.getElementById("startFreshBtn").addEventListener("click", () => {
+    renderPlanForm([]);
+  });
 
   document.getElementById("allDoneBtn").addEventListener("click", () => {
     renderPlanForm([]);
@@ -542,23 +625,65 @@ function renderPlanForm(prefilledTasks) {
       return;
     }
 
-    try {
-      setLoading("Saving tomorrow’s plan...");
-      const res = await apiPost("saveNextDayPlan", {
-        email: state.user.email,
-        plan_date: tomorrow,
-        source_plan_id: state.previousBundle?.plan?.plan_id || "",
-        tasks: finalTasks
-      });
+    await savePlanAndShowPlan(finalTasks, tomorrow);
+  });
+}
 
-      if (!res.ok) throw new Error(res.error || "Could not save plan.");
+function renderEditPrefilledPlanForm(prefilledTasks, planDate) {
+  const padded = [...prefilledTasks];
+  while (padded.length < 6) {
+    padded.push({
+      task_text: "",
+      carried_over: false,
+      visibility: "private",
+      shared_with: "",
+      notes: ""
+    });
+  }
 
-      await refreshAllData();
-      setActiveTab("plan");
-      renderActiveTab();
-    } catch (err) {
-      renderError(err.message || "Could not save tomorrow’s plan.");
+  mainView.innerHTML = `
+    <section class="card hero">
+      <div class="eyebrow">Plan</div>
+      <h2>Build tomorrow from a base list</h2>
+      <p class="muted">Date: ${escapeHtml(planDate)}</p>
+    </section>
+
+    <section class="card">
+      ${padded.map((task, idx) => `
+        <div class="sp12"></div>
+        <div class="label">Priority ${idx + 1}</div>
+        <input class="input prefilledTaskInput" data-rank="${idx + 1}" type="text" value="${escapeAttr(task.task_text || "")}" />
+      `).join("")}
+
+      <div class="sp16"></div>
+      <div class="row stack-mobile">
+        <button id="savePrefilledPlanBtn" class="btn success" type="button">Save Tomorrow’s Plan</button>
+        <button id="cancelPrefilledBtn" class="btn secondary" type="button">Cancel</button>
+      </div>
+    </section>
+  `;
+
+  document.getElementById("savePrefilledPlanBtn").addEventListener("click", async () => {
+    const values = [...document.querySelectorAll(".prefilledTaskInput")].map(el => el.value.trim());
+
+    if (values.some(v => !v) || values.length !== 6) {
+      alert("All 6 priorities must be filled out.");
+      return;
     }
+
+    const finalTasks = values.map((text, idx) => ({
+      task_text: text,
+      carried_over: !!prefilledTasks[idx]?.carried_over,
+      visibility: prefilledTasks[idx]?.visibility || "private",
+      shared_with: prefilledTasks[idx]?.shared_with || "",
+      notes: prefilledTasks[idx]?.notes || ""
+    }));
+
+    await savePlanAndShowPlan(finalTasks, planDate);
+  });
+
+  document.getElementById("cancelPrefilledBtn").addEventListener("click", () => {
+    renderPlanTab();
   });
 }
 
@@ -605,28 +730,32 @@ function renderEditTomorrowPlanForm() {
       notes: tasks[idx]?.notes || ""
     }));
 
-    try {
-      setLoading("Saving plan changes...");
-      const res = await apiPost("saveNextDayPlan", {
-        email: state.user.email,
-        plan_date: tomorrowBundle.plan_date,
-        source_plan_id: state.previousBundle?.plan?.plan_id || "",
-        tasks: finalTasks
-      });
-
-      if (!res.ok) throw new Error(res.error || "Could not save changes.");
-
-      await refreshAllData();
-      setActiveTab("plan");
-      renderActiveTab();
-    } catch (err) {
-      renderError(err.message || "Could not save plan changes.");
-    }
+    await savePlanAndShowPlan(finalTasks, tomorrowBundle.plan_date);
   });
 
   document.getElementById("cancelEditPlanBtn").addEventListener("click", () => {
     renderTomorrowPlanView();
   });
+}
+
+async function savePlanAndShowPlan(finalTasks, planDate) {
+  try {
+    setLoading("Saving plan...");
+    const res = await apiPost("saveNextDayPlan", {
+      email: state.user.email,
+      plan_date: planDate,
+      source_plan_id: state.previousBundle?.plan?.plan_id || "",
+      tasks: finalTasks
+    });
+
+    if (!res.ok) throw new Error(res.error || "Could not save plan.");
+
+    await refreshAllData();
+    setActiveTab("plan");
+    renderActiveTab();
+  } catch (err) {
+    renderError(err.message || "Could not save plan.");
+  }
 }
 
 /* =========================

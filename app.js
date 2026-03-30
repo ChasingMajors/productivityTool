@@ -162,6 +162,10 @@ async function refreshAllData() {
   state.previousBundle = previousBundle;
   state.tomorrowBundle = tomorrowBundle;
 
+  if (todayBundle.user) {
+    state.user = todayBundle.user;
+  }
+
   await loadHistory();
 }
 
@@ -760,11 +764,20 @@ function renderSettingsTab() {
     const morning = document.getElementById("settingsMorning").value || "08:00";
     const evening = document.getElementById("settingsEvening").value || "17:30";
     const interval = document.getElementById("settingsInterval").value || "60";
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Denver";
 
     try {
       setLoading("Saving settings...");
 
-      const res = await apiPost("saveNotificationSettings", {
+      const profileRes = await apiPost("updateUserProfile", {
+        email: state.user.email,
+        display_name: newName,
+        timezone: timezone
+      });
+
+      if (!profileRes.ok) throw new Error(profileRes.error || "Could not save profile.");
+
+      const settingsRes = await apiPost("saveNotificationSettings", {
         email: state.user.email,
         morning_enabled: true,
         morning_time: morning,
@@ -776,12 +789,16 @@ function renderSettingsTab() {
         quiet_hours_end: ""
       });
 
-      if (!res.ok) throw new Error(res.error || "Could not save settings.");
+      if (!settingsRes.ok) throw new Error(settingsRes.error || "Could not save settings.");
 
-      state.user.display_name = newName;
-      state.user.morning_start_time = morning;
-      state.user.planning_reminder_time = evening;
-      state.user.notification_interval = interval;
+      state.user = settingsRes.user || profileRes.user || {
+        ...state.user,
+        display_name: newName,
+        timezone,
+        morning_start_time: morning,
+        planning_reminder_time: evening,
+        notification_interval: interval
+      };
 
       localStorage.setItem(STORE.USER_NAME, newName);
 

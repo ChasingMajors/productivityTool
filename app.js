@@ -66,6 +66,7 @@ async function boot() {
     setLoading("Loading your planner...");
     await ensureUser(email, name || "");
     await refreshAllData();
+    setActiveTab(state.activeTab || "today");
     renderActiveTab();
   } catch (err) {
     renderError(err.message || "Could not load the app.");
@@ -80,7 +81,7 @@ function renderLogin() {
     <section class="card hero">
       <div class="eyebrow">Deep Focus Planner</div>
       <h2>Plan tomorrow. Execute today.</h2>
-      <p class="muted big">Sign in with your email for this first version. Real Google login can come later.</p>
+      <p class="muted big">Sign in with your email for this first version.</p>
     </section>
 
     <section class="card">
@@ -550,7 +551,7 @@ function renderPlanForm(prefilledTasks) {
 
       await refreshAllData();
       setActiveTab("plan");
-      renderPlanTab();
+      renderActiveTab();
     } catch (err) {
       renderError(err.message || "Could not save tomorrow’s plan.");
     }

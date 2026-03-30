@@ -1,4 +1,4 @@
-const API_BASE = "https://script.google.com/macros/s/AKfycbyF2C1s83U4Hh68iCjRj67COnDAHlDS85xGTJ80-jpl7K0BxVCUhCXB2JfQchwik51kBA/exec";
+const API_BASE = "https://script.google.com/macros/s/AKfycbxb_iczejvQoM8RwYXy_cphJfZkZ3qD5YUbBXAH6yxEBuhsq8dk8K6EFAP_DClAw_nH/exec";
 
 const STORE = {
   USER_EMAIL: "dfp_user_email",
@@ -6,12 +6,34 @@ const STORE = {
   ACTIVE_TAB: "dfp_active_tab"
 };
 
+const DAY_META = [
+  { num: 0, short: "Sun", label: "Sunday" },
+  { num: 1, short: "Mon", label: "Monday" },
+  { num: 2, short: "Tue", label: "Tuesday" },
+  { num: 3, short: "Wed", label: "Wednesday" },
+  { num: 4, short: "Thu", label: "Thursday" },
+  { num: 5, short: "Fri", label: "Friday" },
+  { num: 6, short: "Sat", label: "Saturday" }
+];
+
 const state = {
   user: null,
+  settings: {
+    morning_enabled: true,
+    morning_time: "08:00",
+    repeat_enabled: false,
+    repeat_interval: "60",
+    evening_enabled: true,
+    evening_time: "17:30",
+    quiet_hours_start: "",
+    quiet_hours_end: "",
+    active_days: [1, 2, 3, 4, 5]
+  },
   todayYmd: ymdLocal(new Date()),
+  nextPlanDate: null,
   todayBundle: null,
   previousBundle: null,
-  tomorrowBundle: null,
+  nextBundle: null,
   historyBundles: [],
   activeTab: localStorage.getItem(STORE.ACTIVE_TAB) || "today"
 };
@@ -34,8 +56,9 @@ signOutBtn.addEventListener("click", () => {
   state.user = null;
   state.todayBundle = null;
   state.previousBundle = null;
-  state.tomorrowBundle = null;
+  state.nextBundle = null;
   state.historyBundles = [];
+  state.nextPlanDate = null;
   state.activeTab = "today";
 
   disableNavForLoggedOut();
@@ -86,11 +109,6 @@ function renderLogin() {
     </section>
 
     <section class="card">
-      <div class="label">Display name</div>
-      <input id="nameInput" class="input" type="text" placeholder="John" />
-
-      <div class="sp12"></div>
-
       <div class="label">Email</div>
       <input id="emailInput" class="input" type="email" placeholder="you@example.com" />
 
@@ -102,8 +120,6 @@ function renderLogin() {
 
   document.getElementById("continueBtn").addEventListener("click", async () => {
     const email = document.getElementById("emailInput").value.trim().toLowerCase();
-    const name = document.getElementById("nameInput").value.trim();
-
     if (!email) {
       alert("Please enter your email.");
       return;
@@ -111,9 +127,8 @@ function renderLogin() {
 
     try {
       setLoading("Signing you in...");
-      await ensureUser(email, name);
+      await ensureUser(email, localStorage.getItem(STORE.USER_NAME) || "");
       localStorage.setItem(STORE.USER_EMAIL, email);
-      localStorage.setItem(STORE.USER_NAME, name || "");
       setActiveTab("today");
       await refreshAllData();
       renderActiveTab();
@@ -141,26 +156,43 @@ async function ensureUser(email, displayName) {
   return data.user;
 }
 
+async function loadSettings() {
+  const url = new URL(API_BASE);
+  url.searchParams.set("action", "getUserSettings");
+  url.searchParams.set("email", state.user.email);
+
+  const res = await fetch(url.toString());
+  const data = await res.json();
+
+  if (!data.ok) throw new Error(data.error || "Could not load settings.");
+
+  if (data.user) state.user = data.user;
+  if (data.settings) state.settings = normalizeSettings(data.settings);
+}
+
 async function refreshAllData() {
   if (!state.user?.email) return;
 
+  await loadSettings();
+
   const email = state.user.email;
   const today = state.todayYmd;
-  const tomorrow = addDays(today, 1);
+  const nextPlanDate = getNextActiveDate(today, state.settings.active_days);
+  state.nextPlanDate = nextPlanDate;
 
-  const [todayBundle, previousBundle, tomorrowBundle] = await Promise.all([
+  const [todayBundle, previousBundle, nextBundle] = await Promise.all([
     apiGet("getTodayPlan", { email, plan_date: today }),
     apiGet("getPreviousPlan", { email }),
-    apiGet("getTodayPlan", { email, plan_date: tomorrow })
+    apiGet("getTodayPlan", { email, plan_date: nextPlanDate })
   ]);
 
   if (!todayBundle.ok) throw new Error(todayBundle.error || "Could not load today.");
   if (!previousBundle.ok) throw new Error(previousBundle.error || "Could not load previous plan.");
-  if (!tomorrowBundle.ok) throw new Error(tomorrowBundle.error || "Could not load tomorrow.");
+  if (!nextBundle.ok) throw new Error(nextBundle.error || "Could not load next plan.");
 
   state.todayBundle = todayBundle;
   state.previousBundle = previousBundle;
-  state.tomorrowBundle = tomorrowBundle;
+  state.nextBundle = nextBundle;
 
   if (todayBundle.user) {
     state.user = todayBundle.user;
@@ -204,9 +236,7 @@ function updateNav() {
 }
 
 function enableNavForLoggedIn() {
-  navButtons.forEach(btn => {
-    btn.disabled = false;
-  });
+  navButtons.forEach(btn => btn.disabled = false);
   updateNav();
 }
 
@@ -245,9 +275,10 @@ function renderActiveTab() {
 
 function renderTodayTab() {
   const todayBundle = state.todayBundle;
-  const tomorrowBundle = state.tomorrowBundle;
+  const nextBundle = state.nextBundle;
   const todayHasPlan = !!todayBundle?.has_plan;
-  const tomorrowHasPlan = !!tomorrowBundle?.has_plan;
+  const nextHasPlan = !!nextBundle?.has_plan;
+  const nextDayLabel = formatDateFriendly(state.nextPlanDate);
 
   if (!todayHasPlan) {
     mainView.innerHTML = `
@@ -260,18 +291,18 @@ function renderTodayTab() {
       <section class="card">
         <h3>Status</h3>
         <div class="sp12"></div>
-        <div class="badge">${tomorrowHasPlan ? "Tomorrow is already planned" : "Tomorrow is not planned yet"}</div>
+        <div class="badge">${nextHasPlan ? `${nextDayLabel} is already planned` : `${nextDayLabel} is not planned yet`}</div>
         <div class="sp16"></div>
         <div class="row stack-mobile">
-          <button id="goPlanBtn" class="btn primary" type="button">${tomorrowHasPlan ? "Open Tomorrow’s Plan" : "Plan Tomorrow"}</button>
-          ${tomorrowHasPlan ? `<button id="editTomorrowBtn" class="btn secondary" type="button">Edit Tomorrow</button>` : ""}
+          <button id="goPlanBtn" class="btn primary" type="button">${nextHasPlan ? `Open ${nextDayLabel} Plan` : `Plan ${nextDayLabel}`}</button>
+          ${nextHasPlan ? `<button id="editNextBtn" class="btn secondary" type="button">Edit ${nextDayLabel}</button>` : ""}
         </div>
       </section>
 
-      ${tomorrowHasPlan ? `
+      ${nextHasPlan ? `
         <section class="card">
-          <h3>Tomorrow preview</h3>
-          ${(tomorrowBundle.tasks || []).map(task => `
+          <h3>${nextDayLabel} preview</h3>
+          ${(nextBundle.tasks || []).map(task => `
             <div class="task-item">
               <div class="rank">${escapeHtml(String(task.task_rank))}</div>
               <div class="task-copy">${escapeHtml(task.task_text || "")}</div>
@@ -286,14 +317,13 @@ function renderTodayTab() {
       renderActiveTab();
     });
 
-    const editTomorrowBtn = document.getElementById("editTomorrowBtn");
-    if (editTomorrowBtn) {
-      editTomorrowBtn.addEventListener("click", () => {
+    const editNextBtn = document.getElementById("editNextBtn");
+    if (editNextBtn) {
+      editNextBtn.addEventListener("click", () => {
         setActiveTab("plan");
         renderActiveTab();
       });
     }
-
     return;
   }
 
@@ -311,18 +341,18 @@ function renderTodayTab() {
 
       ${!allComplete && current ? `
         <div class="sp16"></div>
-        <button id="completeCurrentBtn" class="btn success full" type="button">Mark Complete</button>
+        <button id="completeCurrentBtn" class="btn success full" type="button">☑ Complete Current Priority</button>
       ` : ""}
     </section>
 
     ${allComplete ? `
       <section class="card">
         <h3>Nice work</h3>
-        <p class="muted">${tomorrowHasPlan ? "Tomorrow is already planned, so you’re set up for the next day." : "Now is a great time to build tomorrow’s six priorities."}</p>
+        <p class="muted">${nextHasPlan ? `${nextDayLabel} is already planned, so you’re set up for the next workday.` : `Now is a great time to build ${nextDayLabel}'s six priorities.`}</p>
         <div class="sp16"></div>
         <div class="row stack-mobile">
-          <button id="todayPlanTomorrowBtn" class="btn primary" type="button">${tomorrowHasPlan ? "View Tomorrow’s Plan" : "Plan Tomorrow"}</button>
-          ${tomorrowHasPlan ? `<button id="todayEditTomorrowBtn" class="btn secondary" type="button">Edit Tomorrow</button>` : ""}
+          <button id="todayPlanNextBtn" class="btn primary" type="button">${nextHasPlan ? `View ${nextDayLabel} Plan` : `Plan ${nextDayLabel}`}</button>
+          ${nextHasPlan ? `<button id="todayEditNextBtn" class="btn secondary" type="button">Edit ${nextDayLabel}</button>` : ""}
         </div>
       </section>
     ` : ""}
@@ -340,10 +370,10 @@ function renderTodayTab() {
       `).join("")}
     </section>
 
-    ${tomorrowHasPlan ? `
+    ${nextHasPlan ? `
       <section class="card">
-        <h3>Tomorrow preview</h3>
-        ${(tomorrowBundle.tasks || []).map(task => `
+        <h3>${nextDayLabel} preview</h3>
+        ${(nextBundle.tasks || []).map(task => `
           <div class="task-item">
             <div class="rank">${escapeHtml(String(task.task_rank))}</div>
             <div class="task-copy">${escapeHtml(task.task_text || "")}</div>
@@ -368,17 +398,17 @@ function renderTodayTab() {
     });
   }
 
-  const todayPlanTomorrowBtn = document.getElementById("todayPlanTomorrowBtn");
-  if (todayPlanTomorrowBtn) {
-    todayPlanTomorrowBtn.addEventListener("click", () => {
+  const todayPlanNextBtn = document.getElementById("todayPlanNextBtn");
+  if (todayPlanNextBtn) {
+    todayPlanNextBtn.addEventListener("click", () => {
       setActiveTab("plan");
       renderActiveTab();
     });
   }
 
-  const todayEditTomorrowBtn = document.getElementById("todayEditTomorrowBtn");
-  if (todayEditTomorrowBtn) {
-    todayEditTomorrowBtn.addEventListener("click", () => {
+  const todayEditNextBtn = document.getElementById("todayEditNextBtn");
+  if (todayEditNextBtn) {
+    todayEditNextBtn.addEventListener("click", () => {
       setActiveTab("plan");
       renderActiveTab();
     });
@@ -390,29 +420,27 @@ function renderTodayTab() {
 ========================= */
 
 function renderPlanTab() {
-  const tomorrowBundle = state.tomorrowBundle;
-
-  if (tomorrowBundle?.has_plan) {
-    renderTomorrowPlanView();
+  if (state.nextBundle?.has_plan) {
+    renderNextPlanView();
     return;
   }
-
   renderPlanningGate(false);
 }
 
-function renderTomorrowPlanView() {
-  const tomorrowBundle = state.tomorrowBundle;
+function renderNextPlanView() {
+  const nextBundle = state.nextBundle;
+  const nextDayLabel = formatDateFriendly(state.nextPlanDate);
 
   mainView.innerHTML = `
     <section class="card hero">
       <div class="eyebrow">Plan</div>
-      <h2>Tomorrow is already planned</h2>
-      <p class="muted">Date: ${escapeHtml(tomorrowBundle.plan_date)}</p>
+      <h2>${nextDayLabel} is already planned</h2>
+      <p class="muted">Date: ${escapeHtml(nextBundle.plan_date)}</p>
     </section>
 
     <section class="card">
-      <h3>Tomorrow’s priorities</h3>
-      ${(tomorrowBundle.tasks || []).map(task => `
+      <h3>${nextDayLabel} priorities</h3>
+      ${(nextBundle.tasks || []).map(task => `
         <div class="task-item">
           <div class="rank">${escapeHtml(String(task.task_rank))}</div>
           <div class="task-copy">${escapeHtml(task.task_text || "")}</div>
@@ -427,26 +455,22 @@ function renderTomorrowPlanView() {
     </section>
   `;
 
-  document.getElementById("editPlanBtn").addEventListener("click", () => {
-    renderEditTomorrowPlanForm();
-  });
-
-  document.getElementById("replacePlanBtn").addEventListener("click", () => {
-    renderPlanningGate(true);
-  });
+  document.getElementById("editPlanBtn").addEventListener("click", renderEditNextPlanForm);
+  document.getElementById("replacePlanBtn").addEventListener("click", () => renderPlanningGate(true));
 }
 
 function renderPlanningGate(isReplacing) {
-  const previousTasks = (state.previousBundle && state.previousBundle.tasks) ? state.previousBundle.tasks : [];
-  const todayTasks = (state.todayBundle && state.todayBundle.tasks) ? state.todayBundle.tasks : [];
-  const hasPreviousPlan = !!(state.previousBundle && state.previousBundle.has_previous_plan && previousTasks.length);
-  const hasTodayPlan = !!(state.todayBundle && state.todayBundle.has_plan && todayTasks.length);
+  const previousTasks = state.previousBundle?.tasks || [];
+  const todayTasks = state.todayBundle?.tasks || [];
+  const hasPreviousPlan = !!(state.previousBundle?.has_previous_plan && previousTasks.length);
+  const hasTodayPlan = !!(state.todayBundle?.has_plan && todayTasks.length);
+  const nextDayLabel = formatDateFriendly(state.nextPlanDate);
 
   mainView.innerHTML = `
     <section class="card hero">
       <div class="eyebrow">Plan</div>
-      <h2>${isReplacing ? "Replace tomorrow’s six priorities" : "Set up tomorrow’s six priorities"}</h2>
-      <p class="muted">Choose the fastest way to build tomorrow’s list.</p>
+      <h2>${isReplacing ? `Replace ${nextDayLabel}'s six priorities` : `Set up ${nextDayLabel}'s six priorities`}</h2>
+      <p class="muted">Choose the fastest way to build the next active workday.</p>
     </section>
 
     <section class="card">
@@ -494,18 +518,12 @@ function renderPlanningGate(isReplacing) {
         shared_with: task.shared_with || "",
         notes: task.notes || ""
       }));
-      renderEditPrefilledPlanForm(prefilled, addDays(state.todayYmd, 1));
+      renderEditPrefilledPlanForm(prefilled, state.nextPlanDate);
     });
   }
 
-  document.getElementById("startFreshBtn").addEventListener("click", () => {
-    renderPlanForm([]);
-  });
-
-  document.getElementById("allDoneBtn").addEventListener("click", () => {
-    renderPlanForm([]);
-  });
-
+  document.getElementById("startFreshBtn").addEventListener("click", () => renderPlanForm([]));
+  document.getElementById("allDoneBtn").addEventListener("click", () => renderPlanForm([]));
   document.getElementById("notDoneBtn").addEventListener("click", () => {
     if (!hasPreviousPlan) {
       renderPlanForm([]);
@@ -533,7 +551,6 @@ function renderCarryoverSelection(tasks) {
           </div>
         </label>
       `).join("")}
-
       <div class="sp16"></div>
       <button id="carryContinueBtn" class="btn primary full" type="button">Continue</button>
     </section>
@@ -558,7 +575,7 @@ function renderCarryoverSelection(tasks) {
 }
 
 function renderPlanForm(prefilledTasks) {
-  const tomorrow = addDays(state.todayYmd, 1);
+  const planDate = state.nextPlanDate;
   const remaining = 6 - prefilledTasks.length;
 
   let carrySection = "";
@@ -588,9 +605,9 @@ function renderPlanForm(prefilledTasks) {
 
   mainView.innerHTML = `
     <section class="card hero">
-      <div class="eyebrow">Tomorrow’s plan</div>
+      <div class="eyebrow">Next plan</div>
       <h2>Build your six priorities</h2>
-      <p class="muted">Date: ${escapeHtml(tomorrow)}</p>
+      <p class="muted">Date: ${escapeHtml(planDate)}</p>
     </section>
 
     ${carrySection}
@@ -600,7 +617,7 @@ function renderPlanForm(prefilledTasks) {
       <p class="muted">You must end with exactly six ranked tasks.</p>
       ${inputSection}
       <div class="sp16"></div>
-      <button id="savePlanBtn" class="btn success full" type="button">Save Tomorrow’s Plan</button>
+      <button id="savePlanBtn" class="btn success full" type="button">Save Plan</button>
     </section>
   `;
 
@@ -625,7 +642,7 @@ function renderPlanForm(prefilledTasks) {
       return;
     }
 
-    await savePlanAndShowPlan(finalTasks, tomorrow);
+    await savePlanAndShowPlan(finalTasks, planDate);
   });
 }
 
@@ -644,7 +661,7 @@ function renderEditPrefilledPlanForm(prefilledTasks, planDate) {
   mainView.innerHTML = `
     <section class="card hero">
       <div class="eyebrow">Plan</div>
-      <h2>Build tomorrow from a base list</h2>
+      <h2>Build the next active day from a base list</h2>
       <p class="muted">Date: ${escapeHtml(planDate)}</p>
     </section>
 
@@ -657,7 +674,7 @@ function renderEditPrefilledPlanForm(prefilledTasks, planDate) {
 
       <div class="sp16"></div>
       <div class="row stack-mobile">
-        <button id="savePrefilledPlanBtn" class="btn success" type="button">Save Tomorrow’s Plan</button>
+        <button id="savePrefilledPlanBtn" class="btn success" type="button">Save Plan</button>
         <button id="cancelPrefilledBtn" class="btn secondary" type="button">Cancel</button>
       </div>
     </section>
@@ -682,20 +699,18 @@ function renderEditPrefilledPlanForm(prefilledTasks, planDate) {
     await savePlanAndShowPlan(finalTasks, planDate);
   });
 
-  document.getElementById("cancelPrefilledBtn").addEventListener("click", () => {
-    renderPlanTab();
-  });
+  document.getElementById("cancelPrefilledBtn").addEventListener("click", renderPlanTab);
 }
 
-function renderEditTomorrowPlanForm() {
-  const tomorrowBundle = state.tomorrowBundle;
-  const tasks = tomorrowBundle?.tasks || [];
+function renderEditNextPlanForm() {
+  const bundle = state.nextBundle;
+  const tasks = bundle?.tasks || [];
 
   mainView.innerHTML = `
     <section class="card hero">
       <div class="eyebrow">Edit Plan</div>
-      <h2>Edit tomorrow’s priorities</h2>
-      <p class="muted">Date: ${escapeHtml(tomorrowBundle.plan_date)}</p>
+      <h2>Edit the next active day</h2>
+      <p class="muted">Date: ${escapeHtml(bundle.plan_date)}</p>
     </section>
 
     <section class="card">
@@ -714,8 +729,7 @@ function renderEditTomorrowPlanForm() {
   `;
 
   document.getElementById("saveEditedPlanBtn").addEventListener("click", async () => {
-    const editedValues = [...document.querySelectorAll(".editTaskInput")]
-      .map(el => el.value.trim());
+    const editedValues = [...document.querySelectorAll(".editTaskInput")].map(el => el.value.trim());
 
     if (editedValues.some(v => !v) || editedValues.length !== 6) {
       alert("All 6 priorities must be filled out.");
@@ -730,12 +744,10 @@ function renderEditTomorrowPlanForm() {
       notes: tasks[idx]?.notes || ""
     }));
 
-    await savePlanAndShowPlan(finalTasks, tomorrowBundle.plan_date);
+    await savePlanAndShowPlan(finalTasks, bundle.plan_date);
   });
 
-  document.getElementById("cancelEditPlanBtn").addEventListener("click", () => {
-    renderTomorrowPlanView();
-  });
+  document.getElementById("cancelEditPlanBtn").addEventListener("click", renderNextPlanView);
 }
 
 async function savePlanAndShowPlan(finalTasks, planDate) {
@@ -834,9 +846,7 @@ function renderHistoryDetail(bundle) {
     </section>
   `;
 
-  document.getElementById("backHistoryBtn").addEventListener("click", () => {
-    renderHistoryTab();
-  });
+  document.getElementById("backHistoryBtn").addEventListener("click", renderHistoryTab);
 }
 
 /* =========================
@@ -845,16 +855,18 @@ function renderHistoryDetail(bundle) {
 
 function renderSettingsTab() {
   const user = state.user || {};
-  const morningTime = user.morning_start_time || "08:00";
-  const eveningTime = user.planning_reminder_time || "17:30";
-  const repeatInterval = user.notification_interval || "60";
+  const settings = state.settings || {};
+  const morningTime = user.morning_start_time || settings.morning_time || "08:00";
+  const eveningTime = user.planning_reminder_time || settings.evening_time || "17:30";
+  const repeatInterval = user.notification_interval || settings.repeat_interval || "60";
   const displayName = user.display_name || "";
+  const activeDays = settings.active_days || [1, 2, 3, 4, 5];
 
   mainView.innerHTML = `
     <section class="card hero">
       <div class="eyebrow">Settings</div>
       <h2>Planner preferences</h2>
-      <p class="muted">These settings prepare the app for reminder support later.</p>
+      <p class="muted">Set your reminder cadence and working days.</p>
     </section>
 
     <section class="card">
@@ -876,11 +888,18 @@ function renderSettingsTab() {
       <div class="label">Repeat reminder interval</div>
       <select id="settingsInterval" class="select">
         ${["15","30","60","90","240"].map(v => `
-          <option value="${v}" ${String(repeatInterval) === v ? "selected" : ""}>
-            ${intervalLabel(v)}
-          </option>
+          <option value="${v}" ${String(repeatInterval) === v ? "selected" : ""}>${intervalLabel(v)}</option>
         `).join("")}
       </select>
+
+      <div class="sp12"></div>
+
+      <div class="label">Notification days</div>
+      <div id="dayToggleWrap" class="row stack-mobile">
+        ${DAY_META.map(day => `
+          <button class="btn ${activeDays.includes(day.num) ? "primary" : "secondary"} day-toggle-btn" data-day="${day.num}" type="button">${day.short}</button>
+        `).join("")}
+      </div>
 
       <div class="sp16"></div>
 
@@ -888,12 +907,37 @@ function renderSettingsTab() {
     </section>
   `;
 
+  const selectedDays = new Set(activeDays);
+
+  document.querySelectorAll(".day-toggle-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const dayNum = Number(btn.dataset.day);
+      if (selectedDays.has(dayNum)) {
+        selectedDays.delete(dayNum);
+      } else {
+        selectedDays.add(dayNum);
+      }
+
+      if (selectedDays.size === 0) {
+        selectedDays.add(1);
+      }
+
+      document.querySelectorAll(".day-toggle-btn").forEach(b => {
+        const n = Number(b.dataset.day);
+        b.classList.remove("primary", "secondary");
+        b.classList.add(selectedDays.has(n) ? "primary" : "secondary");
+      });
+    });
+  });
+
   document.getElementById("saveSettingsBtn").addEventListener("click", async () => {
     const newName = document.getElementById("settingsName").value.trim();
     const morning = document.getElementById("settingsMorning").value || "08:00";
     const evening = document.getElementById("settingsEvening").value || "17:30";
     const interval = document.getElementById("settingsInterval").value || "60";
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Denver";
+    const activeDaysArray = [...selectedDays].sort((a, b) => a - b);
+    const activeDaysString = activeDaysArray.join(",");
 
     try {
       setLoading("Saving settings...");
@@ -903,7 +947,6 @@ function renderSettingsTab() {
         display_name: newName,
         timezone: timezone
       });
-
       if (!profileRes.ok) throw new Error(profileRes.error || "Could not save profile.");
 
       const settingsRes = await apiPost("saveNotificationSettings", {
@@ -915,9 +958,9 @@ function renderSettingsTab() {
         evening_enabled: true,
         evening_time: evening,
         quiet_hours_start: "",
-        quiet_hours_end: ""
+        quiet_hours_end: "",
+        active_days: activeDaysString
       });
-
       if (!settingsRes.ok) throw new Error(settingsRes.error || "Could not save settings.");
 
       state.user = settingsRes.user || profileRes.user || {
@@ -929,8 +972,17 @@ function renderSettingsTab() {
         notification_interval: interval
       };
 
+      state.settings = settingsRes.settings || {
+        ...state.settings,
+        active_days: activeDaysArray,
+        morning_time: morning,
+        evening_time: evening,
+        repeat_interval: interval
+      };
+
       localStorage.setItem(STORE.USER_NAME, newName);
 
+      await refreshAllData();
       renderSettingsSaved();
     } catch (err) {
       renderError(err.message || "Could not save settings.");
@@ -949,9 +1001,7 @@ function renderSettingsSaved() {
     </section>
   `;
 
-  document.getElementById("backSettingsBtn").addEventListener("click", () => {
-    renderSettingsTab();
-  });
+  document.getElementById("backSettingsBtn").addEventListener("click", renderSettingsTab);
 }
 
 /* =========================
@@ -967,6 +1017,56 @@ function intervalLabel(v) {
     case "240": return "Every 4 hours";
     default: return `${v} minutes`;
   }
+}
+
+function normalizeSettings(raw) {
+  return {
+    morning_enabled: !!raw.morning_enabled,
+    morning_time: raw.morning_time || "08:00",
+    repeat_enabled: !!raw.repeat_enabled,
+    repeat_interval: String(raw.repeat_interval || "60"),
+    evening_enabled: !!raw.evening_enabled,
+    evening_time: raw.evening_time || "17:30",
+    quiet_hours_start: raw.quiet_hours_start || "",
+    quiet_hours_end: raw.quiet_hours_end || "",
+    active_days: parseActiveDays(raw.active_days)
+  };
+}
+
+function parseActiveDays(value) {
+  if (Array.isArray(value)) {
+    return value.map(Number).filter(v => !isNaN(v) && v >= 0 && v <= 6).sort((a, b) => a - b);
+  }
+
+  const s = String(value || "1,2,3,4,5");
+  const arr = s.split(",").map(x => Number(x.trim())).filter(v => !isNaN(v) && v >= 0 && v <= 6);
+  return arr.length ? [...new Set(arr)].sort((a, b) => a - b) : [1, 2, 3, 4, 5];
+}
+
+function getNextActiveDate(fromYmd, activeDays) {
+  const allowed = parseActiveDays(activeDays);
+  const base = new Date(`${fromYmd}T12:00:00`);
+
+  for (let i = 1; i <= 14; i++) {
+    const d = new Date(base);
+    d.setDate(d.getDate() + i);
+    if (allowed.includes(d.getDay())) {
+      return ymdLocal(d);
+    }
+  }
+
+  const fallback = new Date(base);
+  fallback.setDate(fallback.getDate() + 1);
+  return ymdLocal(fallback);
+}
+
+function formatDateFriendly(ymd) {
+  const d = new Date(`${ymd}T12:00:00`);
+  return d.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "short",
+    day: "numeric"
+  });
 }
 
 function setLoading(message) {
@@ -1004,11 +1104,7 @@ function renderError(message) {
 async function apiGet(action, params = {}) {
   const url = new URL(API_BASE);
   url.searchParams.set("action", action);
-
-  Object.entries(params).forEach(([key, value]) => {
-    url.searchParams.set(key, value);
-  });
-
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   const res = await fetch(url.toString());
   return await res.json();
 }
@@ -1016,12 +1112,9 @@ async function apiGet(action, params = {}) {
 async function apiPost(action, payload = {}) {
   const res = await fetch(API_BASE, {
     method: "POST",
-    headers: {
-      "Content-Type": "text/plain;charset=utf-8"
-    },
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action, payload })
   });
-
   return await res.json();
 }
 

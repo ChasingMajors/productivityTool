@@ -609,6 +609,18 @@ function renderNextPlanView() {
 function renderPlanningGate(isReplacing) {
   const previousTasks = state.previousBundle?.tasks || [];
   const todayTasks = state.todayBundle?.tasks || [];
+  const nextTasks = state.nextBundle?.tasks || [];
+  const nextTaskSet = new Set(nextTasks.map(task => normalizeTaskText(task.task_text)));
+
+  const carryoverCandidates = previousTasks.filter(task => {
+    const isCompleted = toBool(task.completed);
+    const alreadyInNext = nextTaskSet.has(normalizeTaskText(task.task_text));
+    return !isCompleted && !alreadyInNext;
+  });
+
+  const completedPreviousCount = previousTasks.filter(task => toBool(task.completed)).length;
+  const alreadyMovedCount = previousTasks.filter(task => nextTaskSet.has(normalizeTaskText(task.task_text))).length;
+
   const hasPreviousPlan = !!(state.previousBundle?.has_previous_plan && previousTasks.length);
   const hasTodayPlan = !!(state.todayBundle?.has_plan && todayTasks.length);
   const nextDayLabel = formatDateFriendly(state.nextPlanDate);
@@ -643,15 +655,26 @@ function renderPlanningGate(isReplacing) {
       <section class="card">
         <div class="badge">Previous plan found</div>
         <div class="sp12"></div>
-        ${previousTasks.map(task => `
-          <div class="task-item">
-            <div class="rank">${escapeHtml(String(task.task_rank))}</div>
-            <div class="task-copy">
-              <div>${escapeHtml(task.task_text || "")}</div>
-              <div class="progress">Completed: ${toBool(task.completed) ? "Yes" : "No"}</div>
+        <div class="progress">${carryoverCandidates.length} unfinished priorities available to carry forward</div>
+        <div class="progress">${completedPreviousCount} completed</div>
+        <div class="progress">${alreadyMovedCount} already in the next plan</div>
+
+        <div class="sp12"></div>
+
+        ${previousTasks.map(task => {
+          const isCompleted = toBool(task.completed);
+          const alreadyMoved = nextTaskSet.has(normalizeTaskText(task.task_text));
+          const statusLabel = isCompleted ? "Completed" : (alreadyMoved ? "Already moved to next plan" : "Open");
+          return `
+            <div class="task-item">
+              <div class="rank">${escapeHtml(String(task.task_rank))}</div>
+              <div class="task-copy">
+                <div>${escapeHtml(task.task_text || "")}</div>
+                <div class="progress">${statusLabel}</div>
+              </div>
             </div>
-          </div>
-        `).join("")}
+          `;
+        }).join("")}
       </section>
     ` : ""}
   `;
@@ -678,20 +701,25 @@ function renderPlanningGate(isReplacing) {
   });
 
   document.getElementById("notDoneBtn").addEventListener("click", () => {
-    if (!hasPreviousPlan) {
+    if (!carryoverCandidates.length) {
       renderPlanForm([]);
       return;
     }
-    renderCarryoverSelection(previousTasks);
+    renderCarryoverSelection(carryoverCandidates);
   });
 }
 
 function renderCarryoverSelection(tasks) {
+  if (!tasks.length) {
+    renderPlanForm([]);
+    return;
+  }
+
   mainView.innerHTML = `
     <section class="card hero">
       <div class="eyebrow">Carry over</div>
       <h2>Select unfinished work to move forward</h2>
-      <p class="muted">Choose any number of tasks. You will fill the remaining slots after this.</p>
+      <p class="muted">Only open priorities not already in the next plan are shown here.</p>
     </section>
 
     <section class="card">
@@ -700,7 +728,7 @@ function renderCarryoverSelection(tasks) {
           <input class="carryCheck" type="checkbox" value="${escapeAttr(task.task_text || "")}" />
           <div>
             <div><strong>#${escapeHtml(String(task.task_rank))}</strong> ${escapeHtml(task.task_text || "")}</div>
-            <div class="progress">Completed: ${toBool(task.completed) ? "Yes" : "No"}</div>
+            <div class="progress">Open</div>
           </div>
         </label>
       `).join("")}
@@ -1270,6 +1298,10 @@ function formatDateFriendly(ymd) {
     month: "short",
     day: "numeric"
   });
+}
+
+function normalizeTaskText(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function setLoading(message) {

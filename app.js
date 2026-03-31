@@ -341,6 +341,13 @@ function renderTodayTab() {
     </section>
 
     <section class="card">
+      <div class="row stack-mobile">
+        <button id="selectAllOpenBtn" class="btn secondary" type="button">Select All Open Tasks</button>
+        <button id="buildNextPlanBtn" class="btn primary" type="button">Build Next Plan</button>
+      </div>
+
+      <div class="sp16"></div>
+
       <h3>Update completed priorities</h3>
       <p class="muted">You can mark multiple tasks complete at once.</p>
       ${(tasks || []).map(task => `
@@ -387,6 +394,19 @@ function renderTodayTab() {
       </section>
     ` : ""}
   `;
+
+  document.getElementById("selectAllOpenBtn").addEventListener("click", () => {
+    document.querySelectorAll(".todayTaskCheck").forEach(el => {
+      if (!el.disabled) {
+        el.checked = true;
+      }
+    });
+  });
+
+  document.getElementById("buildNextPlanBtn").addEventListener("click", () => {
+    setActiveTab("plan");
+    renderActiveTab();
+  });
 
   document.getElementById("updateCompletedBtn").addEventListener("click", async () => {
     const checked = [...document.querySelectorAll(".todayTaskCheck:checked:not(:disabled)")];

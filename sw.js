@@ -1,4 +1,4 @@
-const CACHE_NAME = "deep-focus-planner-v10";
+const CACHE_NAME = "deep-focus-planner-v11";
 const ASSETS = [
   "./",
   "./index.html",

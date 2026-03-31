@@ -619,7 +619,8 @@ function renderPlanningGate(isReplacing) {
   });
 
   const completedPreviousCount = previousTasks.filter(task => toBool(task.completed)).length;
-  const alreadyMovedCount = previousTasks.filter(task => nextTaskSet.has(normalizeTaskText(task.task_text))).length;
+  const movedPreviousCount = previousTasks.filter(task => !toBool(task.completed) && nextTaskSet.has(normalizeTaskText(task.task_text))).length;
+  const leftOpenPreviousCount = previousTasks.filter(task => !toBool(task.completed) && !nextTaskSet.has(normalizeTaskText(task.task_text))).length;
 
   const hasPreviousPlan = !!(state.previousBundle?.has_previous_plan && previousTasks.length);
   const hasTodayPlan = !!(state.todayBundle?.has_plan && todayTasks.length);
@@ -657,14 +658,13 @@ function renderPlanningGate(isReplacing) {
         <div class="sp12"></div>
         <div class="progress">${carryoverCandidates.length} unfinished priorities available to carry forward</div>
         <div class="progress">${completedPreviousCount} completed</div>
-        <div class="progress">${alreadyMovedCount} already in the next plan</div>
+        <div class="progress">${movedPreviousCount} moved forward</div>
+        <div class="progress">${leftOpenPreviousCount} left open</div>
 
         <div class="sp12"></div>
 
         ${previousTasks.map(task => {
-          const isCompleted = toBool(task.completed);
-          const alreadyMoved = nextTaskSet.has(normalizeTaskText(task.task_text));
-          const statusLabel = isCompleted ? "Completed" : (alreadyMoved ? "Already moved to next plan" : "Open");
+          const statusLabel = getTaskStateLabel(task, nextTaskSet);
           return `
             <div class="task-item">
               <div class="rank">${escapeHtml(String(task.task_rank))}</div>
@@ -728,7 +728,7 @@ function renderCarryoverSelection(tasks) {
           <input class="carryCheck" type="checkbox" value="${escapeAttr(task.task_text || "")}" />
           <div>
             <div><strong>#${escapeHtml(String(task.task_rank))}</strong> ${escapeHtml(task.task_text || "")}</div>
-            <div class="progress">Open</div>
+            <div class="progress">Left Open</div>
           </div>
         </label>
       `).join("")}
@@ -1028,13 +1028,17 @@ function renderHistoryTab() {
 
     <section class="card">
       ${bundles.map((bundle, idx) => {
-        const completedCount = (bundle.tasks || []).filter(task => toBool(task.completed)).length;
+        const statusCounts = getBundleStatusCounts(bundle);
         return `
           <div class="task-item" style="cursor:pointer;" data-history-index="${idx}">
-            <div class="rank">${completedCount}</div>
+            <div class="rank">${statusCounts.completed}</div>
             <div class="task-copy">
               <div>${escapeHtml(bundle.plan_date)}</div>
-              <div class="progress">${completedCount} of ${(bundle.tasks || []).length} complete</div>
+              <div class="progress">
+                ${statusCounts.completed} completed •
+                ${statusCounts.moved} moved forward •
+                ${statusCounts.open} left open
+              </div>
             </div>
           </div>
         `;
@@ -1051,13 +1055,18 @@ function renderHistoryTab() {
 }
 
 function renderHistoryDetail(bundle) {
-  const completedCount = (bundle.tasks || []).filter(task => toBool(task.completed)).length;
+  const nextTaskSet = buildNextTaskSetForHistory(bundle.plan_date);
+  const statusCounts = getBundleStatusCounts(bundle);
 
   mainView.innerHTML = `
     <section class="card hero">
       <div class="eyebrow">History Detail</div>
       <h2>${escapeHtml(bundle.plan_date)}</h2>
-      <p class="muted">${completedCount} of ${(bundle.tasks || []).length} complete</p>
+      <p class="muted">
+        ${statusCounts.completed} completed •
+        ${statusCounts.moved} moved forward •
+        ${statusCounts.open} left open
+      </p>
     </section>
 
     <section class="card">
@@ -1067,7 +1076,7 @@ function renderHistoryDetail(bundle) {
           <div class="rank">${escapeHtml(String(task.task_rank))}</div>
           <div class="task-copy">
             <div>${escapeHtml(task.task_text || "")}</div>
-            <div class="progress">${toBool(task.completed) ? "Completed" : "Pending"}</div>
+            <div class="progress">${getTaskStateLabel(task, nextTaskSet)}</div>
           </div>
         </div>
       `).join("")}
@@ -1302,6 +1311,36 @@ function formatDateFriendly(ymd) {
 
 function normalizeTaskText(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function getTaskStateLabel(task, nextTaskSet) {
+  if (toBool(task.completed)) return "Completed";
+  if (nextTaskSet && nextTaskSet.has(normalizeTaskText(task.task_text))) return "Moved Forward";
+  return "Left Open";
+}
+
+function buildNextTaskSetForHistory(planDate) {
+  const bundle = state.historyBundles.find(b => b.plan_date === addDays(planDate, 1));
+  const nextTasks = bundle?.tasks || [];
+  return new Set(nextTasks.map(task => normalizeTaskText(task.task_text)));
+}
+
+function getBundleStatusCounts(bundle) {
+  const nextTaskSet = buildNextTaskSetForHistory(bundle.plan_date);
+  const tasks = bundle.tasks || [];
+
+  let completed = 0;
+  let moved = 0;
+  let open = 0;
+
+  tasks.forEach(task => {
+    const label = getTaskStateLabel(task, nextTaskSet);
+    if (label === "Completed") completed++;
+    else if (label === "Moved Forward") moved++;
+    else open++;
+  });
+
+  return { completed, moved, open };
 }
 
 function setLoading(message) {

@@ -259,6 +259,54 @@ button, input, textarea, select {
 
 .checkbox-row input[type="checkbox"] {
   transform: translateY(2px);
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
+.task-row-flex{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  width:100%;
+  gap:10px;
+}
+
+.task-left{
+  flex:1;
+  min-width:0;
+}
+
+.task-right{
+  flex:0 0 auto;
+}
+
+.move-next-link{
+  font-size:13px;
+  color:var(--accent);
+  cursor:pointer;
+  white-space:nowrap;
+  opacity:.9;
+}
+
+.move-next-link:hover{
+  opacity:1;
+  text-decoration:underline;
+}
+
+.day-toggle-row{
+  display:flex;
+  gap:6px;
+  flex-wrap:nowrap;
+  width:100%;
+}
+
+.day-btn-compact{
+  flex:1 1 auto;
+  min-width:0;
+  padding:10px 6px;
+  font-size:12px;
+  border-radius:12px;
 }
 
 .center {
@@ -313,61 +361,4 @@ button, input, textarea, select {
     padding-left: 12px;
     padding-right: 12px;
   }
-  .day-toggle-row{
-  display:flex;
-  gap:6px;
-  flex-wrap:nowrap;
-  width:100%;
 }
-
-.day-btn-compact{
-  flex:1 1 auto;
-  min-width:0;
-  padding:10px 6px;
-  font-size:12px;
-  border-radius:12px;
-}
-
-.checkbox-row{
-  display:flex;
-  align-items:flex-start;
-  gap:10px;
-}
-
-.checkbox-row input[type="checkbox"]{
-  width:18px;
-  height:18px;
-  margin-top:2px;
-}
-
-  .task-row-flex{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  width:100%;
-  gap:10px;
-}
-
-.task-left{
-  flex:1;
-}
-
-.task-right{
-  flex:0 0 auto;
-}
-
-.move-next-link{
-  font-size:13px;
-  color:var(--accent);
-  cursor:pointer;
-  white-space:nowrap;
-  opacity:.9;
-}
-
-.move-next-link:hover{
-  opacity:1;
-  text-decoration:underline;
-}
-
-}
-

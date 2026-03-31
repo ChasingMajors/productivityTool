@@ -357,22 +357,29 @@ function renderTodayTab() {
 
       ${(tasks || []).map(task => `
         <div class="checkbox-row">
-          <input
-            class="todayTaskCheck"
-            type="checkbox"
-            data-task-id="${escapeAttr(task.task_id)}"
-            ${toBool(task.completed) ? "checked" : ""}
-            ${toBool(task.completed) ? "disabled" : ""}
-          />
-          <div style="flex:1;">
-            <div><strong>#${escapeHtml(String(task.task_rank))}</strong> ${escapeHtml(task.task_text || "")}</div>
-            <div class="progress">${toBool(task.completed) ? "Completed" : "Pending"}</div>
-            ${!toBool(task.completed) ? `
-              <div class="sp8"></div>
-              <button class="btn ghost move-next-btn" data-task-id="${escapeAttr(task.task_id)}" type="button">Move to Next Plan</button>
-            ` : ""}
-          </div>
-        </div>
+  <input
+    class="todayTaskCheck"
+    type="checkbox"
+    data-task-id="${escapeAttr(task.task_id)}"
+    ${toBool(task.completed) ? "checked" : ""}
+    ${toBool(task.completed) ? "disabled" : ""}
+  />
+
+  <div class="task-row-flex">
+    <div class="task-left">
+      <div><strong>#${escapeHtml(String(task.task_rank))}</strong> ${escapeHtml(task.task_text || "")}</div>
+      <div class="progress">${toBool(task.completed) ? "Completed" : "Pending"}</div>
+    </div>
+
+    ${!toBool(task.completed) ? `
+      <div class="task-right">
+        <span class="move-next-link" data-task-id="${escapeAttr(task.task_id)}">
+          Move to Next
+        </span>
+      </div>
+    ` : ""}
+  </div>
+</div>
       `).join("")}
 
       <div class="sp16"></div>
@@ -464,7 +471,7 @@ function renderTodayTab() {
     }
   });
 
-  document.querySelectorAll(".move-next-btn").forEach(btn => {
+  document.querySelectorAll(".move-next-link").forEach(btn => {
     btn.addEventListener("click", async () => {
       const taskId = btn.dataset.taskId;
       if (!taskId) return;

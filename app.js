@@ -201,6 +201,38 @@ async function refreshAllData() {
   await loadHistory();
 }
 
+async function refreshTodayAndNextOnly() {
+  if (!state.user?.email) return;
+
+  const email = state.user.email;
+  const today = state.todayYmd;
+  const nextPlanDate = state.nextPlanDate || getNextActiveDate(today, state.settings.active_days);
+
+  const [todayBundle, nextBundle] = await Promise.all([
+    apiGet("getTodayPlan", { email, plan_date: today }),
+    apiGet("getTodayPlan", { email, plan_date: nextPlanDate })
+  ]);
+
+  if (!todayBundle.ok) throw new Error(todayBundle.error || "Could not load today.");
+  if (!nextBundle.ok) throw new Error(nextBundle.error || "Could not load next plan.");
+
+  state.todayBundle = todayBundle;
+  state.nextBundle = nextBundle;
+}
+
+async function refreshNextOnly() {
+  if (!state.user?.email) return;
+
+  const email = state.user.email;
+  const nextPlanDate = state.nextPlanDate || getNextActiveDate(state.todayYmd, state.settings.active_days);
+
+  const nextBundle = await apiGet("getTodayPlan", { email, plan_date: nextPlanDate });
+
+  if (!nextBundle.ok) throw new Error(nextBundle.error || "Could not load next plan.");
+
+  state.nextBundle = nextBundle;
+}
+
 async function loadHistory() {
   const email = state.user?.email;
   if (!email) {
@@ -357,29 +389,29 @@ function renderTodayTab() {
 
       ${(tasks || []).map(task => `
         <div class="checkbox-row">
-  <input
-    class="todayTaskCheck"
-    type="checkbox"
-    data-task-id="${escapeAttr(task.task_id)}"
-    ${toBool(task.completed) ? "checked" : ""}
-    ${toBool(task.completed) ? "disabled" : ""}
-  />
+          <input
+            class="todayTaskCheck"
+            type="checkbox"
+            data-task-id="${escapeAttr(task.task_id)}"
+            ${toBool(task.completed) ? "checked" : ""}
+            ${toBool(task.completed) ? "disabled" : ""}
+          />
 
-  <div class="task-row-flex">
-    <div class="task-left">
-      <div><strong>#${escapeHtml(String(task.task_rank))}</strong> ${escapeHtml(task.task_text || "")}</div>
-      <div class="progress">${toBool(task.completed) ? "Completed" : "Pending"}</div>
-    </div>
+          <div class="task-row-flex">
+            <div class="task-left">
+              <div><strong>#${escapeHtml(String(task.task_rank))}</strong> ${escapeHtml(task.task_text || "")}</div>
+              <div class="progress">${toBool(task.completed) ? "Completed" : "Pending"}</div>
+            </div>
 
-    ${!toBool(task.completed) ? `
-      <div class="task-right">
-        <span class="move-next-link" data-task-id="${escapeAttr(task.task_id)}">
-          Move to Next
-        </span>
-      </div>
-    ` : ""}
-  </div>
-</div>
+            ${!toBool(task.completed) ? `
+              <div class="task-right">
+                <span class="move-next-link" data-task-id="${escapeAttr(task.task_id)}">
+                  Move to Next
+                </span>
+              </div>
+            ` : ""}
+          </div>
+        </div>
       `).join("")}
 
       <div class="sp16"></div>
@@ -459,12 +491,11 @@ function renderTodayTab() {
     }
 
     try {
-      setLoading("Updating completed tasks...");
       for (const taskId of taskIds) {
         const res = await apiPost("completeTask", { task_id: taskId });
         if (!res.ok) throw new Error(res.error || "Could not complete task.");
       }
-      await refreshAllData();
+      await refreshTodayAndNextOnly();
       renderTodayTab();
     } catch (err) {
       renderError(err.message || "Could not update tasks.");
@@ -477,26 +508,30 @@ function renderTodayTab() {
       if (!taskId) return;
 
       try {
-        setLoading("Moving priority to next plan...");
         const res = await apiPost("moveTaskToNextPlan", {
-  email: state.user.email,
-  task_id: taskId,
-  target_date: state.nextPlanDate
-});
+          email: state.user.email,
+          task_id: taskId,
+          target_date: state.nextPlanDate
+        });
 
         if (!res.ok) {
           alert(res.error || "Could not move priority to next plan.");
-          await refreshAllData();
+          await refreshTodayAndNextOnly();
           renderTodayTab();
           return;
         }
 
-        await refreshAllData();
+        await refreshTodayAndNextOnly();
 
         if (res.duplicate) {
           alert(res.message || "That priority is already in the next plan.");
-        } else {
-          alert(res.message || "Priority moved to the next plan.");
+          renderTodayTab();
+          return;
+        }
+
+        if (state.nextBundle?.has_plan) {
+          renderEditNextPlanForm();
+          return;
         }
 
         renderTodayTab();
@@ -851,7 +886,18 @@ function renderEditPrefilledPlanForm(prefilledTasks, planDate) {
 
 function renderEditNextPlanForm() {
   const bundle = state.nextBundle;
-  const tasks = bundle?.tasks || [];
+  const existingTasks = bundle?.tasks || [];
+  const padded = [...existingTasks];
+
+  while (padded.length < 6) {
+    padded.push({
+      task_text: "",
+      carried_over: false,
+      visibility: "private",
+      shared_with: "",
+      notes: ""
+    });
+  }
 
   mainView.innerHTML = `
     <section class="card hero">
@@ -867,7 +913,7 @@ function renderEditNextPlanForm() {
 
       <div class="sp16"></div>
 
-      ${tasks.map((task, idx) => `
+      ${padded.map((task, idx) => `
         <div class="sp12"></div>
         <div class="label">Priority ${idx + 1}</div>
         <input class="input editTaskInput" data-rank="${idx + 1}" type="text" value="${escapeAttr(task.task_text || "")}" />
@@ -891,10 +937,10 @@ function renderEditNextPlanForm() {
 
     const finalTasks = editedValues.map((text, idx) => ({
       task_text: text,
-      carried_over: toBool(tasks[idx]?.carried_over),
-      visibility: tasks[idx]?.visibility || "private",
-      shared_with: tasks[idx]?.shared_with || "",
-      notes: tasks[idx]?.notes || ""
+      carried_over: toBool(existingTasks[idx]?.carried_over),
+      visibility: existingTasks[idx]?.visibility || "private",
+      shared_with: existingTasks[idx]?.shared_with || "",
+      notes: existingTasks[idx]?.notes || ""
     }));
 
     await savePlanAndShowPlan(finalTasks, bundle.plan_date);

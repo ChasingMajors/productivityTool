@@ -338,6 +338,106 @@ function renderTodayTab() {
       <h2>${allComplete ? "All priorities complete" : `Priority ${escapeHtml(String(current?.task_rank || ""))}`}</h2>
       <p class="big">${allComplete ? "You completed all six priorities for today." : escapeHtml(current?.task_text || "")}</p>
       <div class="kpi">${completedCount} of 6 complete</div>
+    </section>
+
+    <section class="card">
+      <h3>Update completed priorities</h3>
+      <p class="muted">You can mark multiple tasks complete at once.</p>
+      ${(tasks || []).map(task => `
+        <label class="checkbox-row">
+          <input
+            class="todayTaskCheck"
+            type="checkbox"
+            data-task-id="${escapeAttr(task.task_id)}"
+            ${toBool(task.completed) ? "checked" : ""}
+            ${toBool(task.completed) ? "disabled" : ""}
+          />
+          <div>
+            <div><strong>#${escapeHtml(String(task.task_rank))}</strong> ${escapeHtml(task.task_text || "")}</div>
+            <div class="progress">${toBool(task.completed) ? "Completed" : "Pending"}</div>
+          </div>
+        </label>
+      `).join("")}
+
+      <div class="sp16"></div>
+      <button id="updateCompletedBtn" class="btn success full" type="button">Update Completed Tasks</button>
+    </section>
+
+    ${allComplete ? `
+      <section class="card">
+        <h3>Nice work</h3>
+        <p class="muted">${nextHasPlan ? `${nextDayLabel} is already planned, so you’re set up for the next workday.` : `Now is a great time to build ${nextDayLabel}'s six priorities.`}</p>
+        <div class="sp16"></div>
+        <div class="row stack-mobile">
+          <button id="todayPlanNextBtn" class="btn primary" type="button">${nextHasPlan ? `View ${nextDayLabel} Plan` : `Plan ${nextDayLabel}`}</button>
+          ${nextHasPlan ? `<button id="todayEditNextBtn" class="btn secondary" type="button">Edit ${nextDayLabel}</button>` : ""}
+        </div>
+      </section>
+    ` : ""}
+
+    ${nextHasPlan ? `
+      <section class="card">
+        <h3>${nextDayLabel} preview</h3>
+        ${(nextBundle.tasks || []).map(task => `
+          <div class="task-item">
+            <div class="rank">${escapeHtml(String(task.task_rank))}</div>
+            <div class="task-copy">${escapeHtml(task.task_text || "")}</div>
+          </div>
+        `).join("")}
+      </section>
+    ` : ""}
+  `;
+
+  document.getElementById("updateCompletedBtn").addEventListener("click", async () => {
+    const checked = [...document.querySelectorAll(".todayTaskCheck:checked:not(:disabled)")];
+    const taskIds = checked.map(el => el.dataset.taskId).filter(Boolean);
+
+    if (!taskIds.length) {
+      alert("No new completed priorities selected.");
+      return;
+    }
+
+    try {
+      setLoading("Updating completed tasks...");
+      for (const taskId of taskIds) {
+        const res = await apiPost("completeTask", { task_id: taskId });
+        if (!res.ok) throw new Error(res.error || "Could not complete task.");
+      }
+      await refreshAllData();
+      renderTodayTab();
+    } catch (err) {
+      renderError(err.message || "Could not update tasks.");
+    }
+  });
+
+  const todayPlanNextBtn = document.getElementById("todayPlanNextBtn");
+  if (todayPlanNextBtn) {
+    todayPlanNextBtn.addEventListener("click", () => {
+      setActiveTab("plan");
+      renderActiveTab();
+    });
+  }
+
+  const todayEditNextBtn = document.getElementById("todayEditNextBtn");
+  if (todayEditNextBtn) {
+    todayEditNextBtn.addEventListener("click", () => {
+      setActiveTab("plan");
+      renderActiveTab();
+    });
+  }
+}
+
+  const tasks = todayBundle.tasks || [];
+  const current = todayBundle.current_task;
+  const completedCount = tasks.filter(task => toBool(task.completed)).length;
+  const allComplete = completedCount === 6;
+
+  mainView.innerHTML = `
+    <section class="card hero">
+      <div class="eyebrow">Today’s Focus</div>
+      <h2>${allComplete ? "All priorities complete" : `Priority ${escapeHtml(String(current?.task_rank || ""))}`}</h2>
+      <p class="big">${allComplete ? "You completed all six priorities for today." : escapeHtml(current?.task_text || "")}</p>
+      <div class="kpi">${completedCount} of 6 complete</div>
 
       ${!allComplete && current ? `
         <div class="sp16"></div>
@@ -895,11 +995,11 @@ function renderSettingsTab() {
       <div class="sp12"></div>
 
       <div class="label">Notification days</div>
-      <div id="dayToggleWrap" class="row stack-mobile">
-        ${DAY_META.map(day => `
-          <button class="btn ${activeDays.includes(day.num) ? "primary" : "secondary"} day-toggle-btn" data-day="${day.num}" type="button">${day.short}</button>
-        `).join("")}
-      </div>
+<div id="dayToggleWrap" class="day-toggle-row">
+  ${DAY_META.map(day => `
+    <button class="btn ${activeDays.includes(day.num) ? "primary" : "secondary"} day-toggle-btn day-btn-compact" data-day="${day.num}" type="button">${day.short}</button>
+  `).join("")}
+</div>
 
       <div class="sp16"></div>
 

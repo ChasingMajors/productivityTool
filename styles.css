@@ -340,5 +340,34 @@ button, input, textarea, select {
   margin-top:2px;
 }
 
+  .task-row-flex{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  width:100%;
+  gap:10px;
+}
+
+.task-left{
+  flex:1;
+}
+
+.task-right{
+  flex:0 0 auto;
+}
+
+.move-next-link{
+  font-size:13px;
+  color:var(--accent);
+  cursor:pointer;
+  white-space:nowrap;
+  opacity:.9;
+}
+
+.move-next-link:hover{
+  opacity:1;
+  text-decoration:underline;
+}
+
 }
 

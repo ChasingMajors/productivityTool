@@ -472,10 +472,10 @@ function renderTodayTab() {
       try {
         setLoading("Moving priority to next plan...");
         const res = await apiPost("moveTaskToNextPlan", {
-          email: state.user.email,
-          task_id: taskId,
-          target_plan_date: state.nextPlanDate
-        });
+  email: state.user.email,
+  task_id: taskId,
+  target_date: state.nextPlanDate
+});
 
         if (!res.ok) {
           alert(res.error || "Could not move priority to next plan.");

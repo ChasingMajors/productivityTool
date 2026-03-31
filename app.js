@@ -1,4 +1,4 @@
-const API_BASE = "https://script.google.com/macros/s/AKfycbxb_iczejvQoM8RwYXy_cphJfZkZ3qD5YUbBXAH6yxEBuhsq8dk8K6EFAP_DClAw_nH/exec";
+const API_BASE = "https://script.google.com/macros/s/AKfycbzyl1_XyiaMSSrB2AV8JNrYOlBwiYTF0XqUVhxflNMSkHij-V22v6RrIbLcgqC5j5wc1g/exec";
 
 const STORE = {
   USER_EMAIL: "dfp_user_email",
@@ -335,7 +335,6 @@ function renderTodayTab() {
   const current = todayBundle.current_task;
   const completedCount = tasks.filter(task => toBool(task.completed)).length;
   const allComplete = completedCount === 6;
-  const openTaskCheckboxes = tasks.filter(task => !toBool(task.completed)).length;
 
   mainView.innerHTML = `
     <section class="card hero">
@@ -354,9 +353,10 @@ function renderTodayTab() {
       <div class="sp16"></div>
 
       <h3>Update completed priorities</h3>
-      <p class="muted">You can mark multiple tasks complete at once.</p>
+      <p class="muted">You can mark multiple tasks complete at once or move open tasks forward.</p>
+
       ${(tasks || []).map(task => `
-        <label class="checkbox-row">
+        <div class="checkbox-row">
           <input
             class="todayTaskCheck"
             type="checkbox"
@@ -364,11 +364,15 @@ function renderTodayTab() {
             ${toBool(task.completed) ? "checked" : ""}
             ${toBool(task.completed) ? "disabled" : ""}
           />
-          <div>
+          <div style="flex:1;">
             <div><strong>#${escapeHtml(String(task.task_rank))}</strong> ${escapeHtml(task.task_text || "")}</div>
             <div class="progress">${toBool(task.completed) ? "Completed" : "Pending"}</div>
+            ${!toBool(task.completed) ? `
+              <div class="sp8"></div>
+              <button class="btn ghost move-next-btn" data-task-id="${escapeAttr(task.task_id)}" type="button">Move to Next Plan</button>
+            ` : ""}
           </div>
-        </label>
+        </div>
       `).join("")}
 
       <div class="sp16"></div>
@@ -458,6 +462,41 @@ function renderTodayTab() {
     } catch (err) {
       renderError(err.message || "Could not update tasks.");
     }
+  });
+
+  document.querySelectorAll(".move-next-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const taskId = btn.dataset.taskId;
+      if (!taskId) return;
+
+      try {
+        setLoading("Moving priority to next plan...");
+        const res = await apiPost("moveTaskToNextPlan", {
+          email: state.user.email,
+          task_id: taskId,
+          target_plan_date: state.nextPlanDate
+        });
+
+        if (!res.ok) {
+          alert(res.error || "Could not move priority to next plan.");
+          await refreshAllData();
+          renderTodayTab();
+          return;
+        }
+
+        await refreshAllData();
+
+        if (res.duplicate) {
+          alert(res.message || "That priority is already in the next plan.");
+        } else {
+          alert(res.message || "Priority moved to the next plan.");
+        }
+
+        renderTodayTab();
+      } catch (err) {
+        renderError(err.message || "Could not move priority.");
+      }
+    });
   });
 
   const todayPlanNextBtn = document.getElementById("todayPlanNextBtn");

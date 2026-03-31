@@ -313,8 +313,12 @@ function renderTodayTab() {
     `;
 
     document.getElementById("goPlanBtn").addEventListener("click", () => {
-      setActiveTab("plan");
-      renderActiveTab();
+      if (nextHasPlan) {
+        setActiveTab("plan");
+        renderActiveTab();
+      } else {
+        renderPlanForm([]);
+      }
     });
 
     const editNextBtn = document.getElementById("editNextBtn");
@@ -331,6 +335,7 @@ function renderTodayTab() {
   const current = todayBundle.current_task;
   const completedCount = tasks.filter(task => toBool(task.completed)).length;
   const allComplete = completedCount === 6;
+  const openTaskCheckboxes = tasks.filter(task => !toBool(task.completed)).length;
 
   mainView.innerHTML = `
     <section class="card hero">
@@ -395,17 +400,42 @@ function renderTodayTab() {
     ` : ""}
   `;
 
-  document.getElementById("selectAllOpenBtn").addEventListener("click", () => {
-    document.querySelectorAll(".todayTaskCheck").forEach(el => {
-      if (!el.disabled) {
-        el.checked = true;
-      }
+  const selectAllOpenBtn = document.getElementById("selectAllOpenBtn");
+  if (selectAllOpenBtn) {
+    const openBoxes = [...document.querySelectorAll(".todayTaskCheck:not(:disabled)")];
+    const allOpenChecked = openBoxes.length > 0 && openBoxes.every(el => el.checked);
+    selectAllOpenBtn.textContent = allOpenChecked ? "Unselect All Open Tasks" : "Select All Open Tasks";
+
+    selectAllOpenBtn.addEventListener("click", () => {
+      const currentOpenBoxes = [...document.querySelectorAll(".todayTaskCheck:not(:disabled)")];
+      const currentlyAllChecked = currentOpenBoxes.length > 0 && currentOpenBoxes.every(el => el.checked);
+
+      currentOpenBoxes.forEach(el => {
+        el.checked = !currentlyAllChecked;
+      });
+
+      selectAllOpenBtn.textContent = currentlyAllChecked ? "Select All Open Tasks" : "Unselect All Open Tasks";
+    });
+  }
+
+  document.querySelectorAll(".todayTaskCheck:not(:disabled)").forEach(el => {
+    el.addEventListener("change", () => {
+      const btn = document.getElementById("selectAllOpenBtn");
+      if (!btn) return;
+
+      const openBoxes = [...document.querySelectorAll(".todayTaskCheck:not(:disabled)")];
+      const allOpenChecked = openBoxes.length > 0 && openBoxes.every(box => box.checked);
+      btn.textContent = allOpenChecked ? "Unselect All Open Tasks" : "Select All Open Tasks";
     });
   });
 
   document.getElementById("buildNextPlanBtn").addEventListener("click", () => {
-    setActiveTab("plan");
-    renderActiveTab();
+    if (nextHasPlan) {
+      setActiveTab("plan");
+      renderActiveTab();
+    } else {
+      renderPlanForm([]);
+    }
   });
 
   document.getElementById("updateCompletedBtn").addEventListener("click", async () => {
@@ -433,8 +463,12 @@ function renderTodayTab() {
   const todayPlanNextBtn = document.getElementById("todayPlanNextBtn");
   if (todayPlanNextBtn) {
     todayPlanNextBtn.addEventListener("click", () => {
-      setActiveTab("plan");
-      renderActiveTab();
+      if (nextHasPlan) {
+        setActiveTab("plan");
+        renderActiveTab();
+      } else {
+        renderPlanForm([]);
+      }
     });
   }
 
@@ -511,6 +545,7 @@ function renderPlanningGate(isReplacing) {
       <div class="row stack-mobile">
         ${hasTodayPlan ? `<button id="startFromTodayBtn" class="btn primary" type="button">Start From Today</button>` : ""}
         <button id="startFreshBtn" class="btn secondary" type="button">Start Fresh</button>
+        <button id="backToTodayBtn" class="btn ghost" type="button">Back to Today's Plan</button>
       </div>
     </section>
 
@@ -556,6 +591,11 @@ function renderPlanningGate(isReplacing) {
 
   document.getElementById("startFreshBtn").addEventListener("click", () => renderPlanForm([]));
   document.getElementById("allDoneBtn").addEventListener("click", () => renderPlanForm([]));
+  document.getElementById("backToTodayBtn").addEventListener("click", () => {
+    setActiveTab("today");
+    renderActiveTab();
+  });
+
   document.getElementById("notDoneBtn").addEventListener("click", () => {
     if (!hasPreviousPlan) {
       renderPlanForm([]);
@@ -584,7 +624,10 @@ function renderCarryoverSelection(tasks) {
         </label>
       `).join("")}
       <div class="sp16"></div>
-      <button id="carryContinueBtn" class="btn primary full" type="button">Continue</button>
+      <div class="row stack-mobile">
+        <button id="carryContinueBtn" class="btn primary" type="button">Continue</button>
+        <button id="backToTodayFromCarryBtn" class="btn ghost" type="button">Back to Today's Plan</button>
+      </div>
     </section>
   `;
 
@@ -603,6 +646,11 @@ function renderCarryoverSelection(tasks) {
     }
 
     renderPlanForm(selected);
+  });
+
+  document.getElementById("backToTodayFromCarryBtn").addEventListener("click", () => {
+    setActiveTab("today");
+    renderActiveTab();
   });
 }
 
@@ -645,6 +693,12 @@ function renderPlanForm(prefilledTasks) {
     ${carrySection}
 
     <section class="card">
+      <div class="row stack-mobile">
+        <button id="backToTodayFromPlanBtn" class="btn ghost" type="button">Back to Today's Plan</button>
+      </div>
+
+      <div class="sp16"></div>
+
       <h3>Add remaining priorities</h3>
       <p class="muted">You must end with exactly six ranked tasks.</p>
       ${inputSection}
@@ -676,6 +730,11 @@ function renderPlanForm(prefilledTasks) {
 
     await savePlanAndShowPlan(finalTasks, planDate);
   });
+
+  document.getElementById("backToTodayFromPlanBtn").addEventListener("click", () => {
+    setActiveTab("today");
+    renderActiveTab();
+  });
 }
 
 function renderEditPrefilledPlanForm(prefilledTasks, planDate) {
@@ -698,6 +757,12 @@ function renderEditPrefilledPlanForm(prefilledTasks, planDate) {
     </section>
 
     <section class="card">
+      <div class="row stack-mobile">
+        <button id="backToTodayFromPrefilledBtn" class="btn ghost" type="button">Back to Today's Plan</button>
+      </div>
+
+      <div class="sp16"></div>
+
       ${padded.map((task, idx) => `
         <div class="sp12"></div>
         <div class="label">Priority ${idx + 1}</div>
@@ -732,6 +797,10 @@ function renderEditPrefilledPlanForm(prefilledTasks, planDate) {
   });
 
   document.getElementById("cancelPrefilledBtn").addEventListener("click", renderPlanTab);
+  document.getElementById("backToTodayFromPrefilledBtn").addEventListener("click", () => {
+    setActiveTab("today");
+    renderActiveTab();
+  });
 }
 
 function renderEditNextPlanForm() {
@@ -746,6 +815,12 @@ function renderEditNextPlanForm() {
     </section>
 
     <section class="card">
+      <div class="row stack-mobile">
+        <button id="backToTodayFromEditBtn" class="btn ghost" type="button">Back to Today's Plan</button>
+      </div>
+
+      <div class="sp16"></div>
+
       ${tasks.map((task, idx) => `
         <div class="sp12"></div>
         <div class="label">Priority ${idx + 1}</div>
@@ -780,6 +855,10 @@ function renderEditNextPlanForm() {
   });
 
   document.getElementById("cancelEditPlanBtn").addEventListener("click", renderNextPlanView);
+  document.getElementById("backToTodayFromEditBtn").addEventListener("click", () => {
+    setActiveTab("today");
+    renderActiveTab();
+  });
 }
 
 async function savePlanAndShowPlan(finalTasks, planDate) {

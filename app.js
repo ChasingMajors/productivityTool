@@ -1,9 +1,10 @@
-const API_BASE = "https://script.google.com/macros/s/AKfycbzyl1_XyiaMSSrB2AV8JNrYOlBwiYTF0XqUVhxflNMSkHij-V22v6RrIbLcgqC5j5wc1g/exec";
+const API_BASE = "https://script.google.com/macros/s/AKfycbx6qKfpl65txjQD4D7Xj7D7hZ50zhY1jYZkGuusFO_spGsBTovFSoJRviAzZnWyg1mCYg/exec";
 
 const STORE = {
   USER_EMAIL: "dfp_user_email",
   USER_NAME: "dfp_user_name",
-  ACTIVE_TAB: "dfp_active_tab"
+  ACTIVE_TAB: "dfp_active_tab",
+  BOOTSTRAP_CACHE: "dfp_bootstrap_cache"
 };
 
 const DAY_META = [
@@ -35,6 +36,7 @@ const state = {
   previousBundle: null,
   nextBundle: null,
   historyBundles: [],
+  historyLoaded: false,
   activeTab: localStorage.getItem(STORE.ACTIVE_TAB) || "today"
 };
 
@@ -52,12 +54,26 @@ signOutBtn.addEventListener("click", () => {
   localStorage.removeItem(STORE.USER_EMAIL);
   localStorage.removeItem(STORE.USER_NAME);
   localStorage.removeItem(STORE.ACTIVE_TAB);
+  localStorage.removeItem(STORE.BOOTSTRAP_CACHE);
 
   state.user = null;
+  state.settings = {
+    morning_enabled: true,
+    morning_time: "08:00",
+    repeat_enabled: false,
+    repeat_interval: "60",
+    evening_enabled: true,
+    evening_time: "17:30",
+    quiet_hours_start: "",
+    quiet_hours_end: "",
+    active_days: [1, 2, 3, 4, 5]
+  };
+  state.todayYmd = ymdLocal(new Date());
   state.todayBundle = null;
   state.previousBundle = null;
   state.nextBundle = null;
   state.historyBundles = [];
+  state.historyLoaded = false;
   state.nextPlanDate = null;
   state.activeTab = "today";
 
@@ -67,10 +83,17 @@ signOutBtn.addEventListener("click", () => {
 });
 
 navButtons.forEach(btn => {
-  btn.addEventListener("click", () => {
+  btn.addEventListener("click", async () => {
     const tab = btn.dataset.tab;
     if (!tab || !state.user) return;
     setActiveTab(tab);
+
+    if (tab === "history" && !state.historyLoaded) {
+      renderHistoryLoading();
+      await loadHistoryInBackground(true);
+      return;
+    }
+
     renderActiveTab();
   });
 });
@@ -87,11 +110,25 @@ async function boot() {
   }
 
   try {
+    const cached = readBootstrapCache(email);
+    if (cached) {
+      applyBootstrapData(cached);
+      if (!state.activeTab) setActiveTab("today");
+      renderActiveTab();
+      bootstrapApp(email, name || "", { preferFresh: true })
+        .then(() => {
+          if (state.activeTab !== "history") renderActiveTab();
+        })
+        .catch(console.error);
+      loadHistoryInBackground(false);
+      return;
+    }
+
     setLoading("Loading your planner...");
-    await ensureUser(email, name || "");
-    await refreshAllData();
+    await bootstrapApp(email, name || "", { preferFresh: true });
     if (!state.activeTab) setActiveTab("today");
     renderActiveTab();
+    loadHistoryInBackground(false);
   } catch (err) {
     renderError(err.message || "Could not load the app.");
   }
@@ -111,9 +148,7 @@ function renderLogin() {
     <section class="card">
       <div class="label">Email</div>
       <input id="emailInput" class="input" type="email" placeholder="you@example.com" />
-
       <div class="sp16"></div>
-
       <button id="continueBtn" class="btn primary full" type="button">Continue</button>
     </section>
   `;
@@ -127,78 +162,81 @@ function renderLogin() {
 
     try {
       setLoading("Signing you in...");
-      await ensureUser(email, localStorage.getItem(STORE.USER_NAME) || "");
       localStorage.setItem(STORE.USER_EMAIL, email);
       setActiveTab("today");
-      await refreshAllData();
+      await bootstrapApp(email, localStorage.getItem(STORE.USER_NAME) || "", { preferFresh: true });
       renderActiveTab();
+      loadHistoryInBackground(false);
     } catch (err) {
       renderError(err.message || "Could not sign in.");
     }
   });
 }
 
-async function ensureUser(email, displayName) {
+async function bootstrapApp(email, displayName, options = {}) {
   const url = new URL(API_BASE);
-  url.searchParams.set("action", "getOrCreateUser");
+  url.searchParams.set("action", "bootstrapApp");
   url.searchParams.set("email", email);
   url.searchParams.set("display_name", displayName || "");
   url.searchParams.set("timezone", Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Denver");
 
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), { cache: "no-store" });
   const data = await res.json();
 
-  if (!data.ok) throw new Error(data.error || "User lookup failed.");
+  if (!data.ok) throw new Error(data.error || "Bootstrap failed.");
 
-  state.user = data.user;
+  applyBootstrapData(data);
+  writeBootstrapCache(email, data);
+
   signOutBtn.classList.remove("hidden");
   enableNavForLoggedIn();
-  return data.user;
+  return data;
 }
 
-async function loadSettings() {
-  const url = new URL(API_BASE);
-  url.searchParams.set("action", "getUserSettings");
-  url.searchParams.set("email", state.user.email);
+function applyBootstrapData(data) {
+  state.user = data.user;
+  state.settings = normalizeSettings(data.settings || {});
+  state.todayYmd = data.todayYmd || ymdLocal(new Date());
+  state.nextPlanDate = data.nextPlanDate || getNextActiveDate(state.todayYmd, state.settings.active_days);
+  state.todayBundle = data.todayBundle || null;
+  state.previousBundle = data.previousBundle || null;
+  state.nextBundle = data.nextBundle || null;
 
-  const res = await fetch(url.toString());
-  const data = await res.json();
+  if (state.user?.display_name) {
+    localStorage.setItem(STORE.USER_NAME, state.user.display_name);
+  }
+}
 
-  if (!data.ok) throw new Error(data.error || "Could not load settings.");
+function readBootstrapCache(email) {
+  try {
+    const raw = localStorage.getItem(STORE.BOOTSTRAP_CACHE);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.email !== email) return null;
+    const ageMs = Date.now() - Number(parsed.ts || 0);
+    if (ageMs > 2 * 60 * 1000) return null;
+    return parsed.data || null;
+  } catch {
+    return null;
+  }
+}
 
-  if (data.user) state.user = data.user;
-  if (data.settings) state.settings = normalizeSettings(data.settings);
+function writeBootstrapCache(email, data) {
+  try {
+    localStorage.setItem(
+      STORE.BOOTSTRAP_CACHE,
+      JSON.stringify({
+        email,
+        ts: Date.now(),
+        data
+      })
+    );
+  } catch {}
 }
 
 async function refreshAllData() {
   if (!state.user?.email) return;
-
-  await loadSettings();
-
-  const email = state.user.email;
-  const today = state.todayYmd;
-  const nextPlanDate = getNextActiveDate(today, state.settings.active_days);
-  state.nextPlanDate = nextPlanDate;
-
-  const [todayBundle, previousBundle, nextBundle] = await Promise.all([
-    apiGet("getTodayPlan", { email, plan_date: today }),
-    apiGet("getPreviousPlan", { email }),
-    apiGet("getTodayPlan", { email, plan_date: nextPlanDate })
-  ]);
-
-  if (!todayBundle.ok) throw new Error(todayBundle.error || "Could not load today.");
-  if (!previousBundle.ok) throw new Error(previousBundle.error || "Could not load previous plan.");
-  if (!nextBundle.ok) throw new Error(nextBundle.error || "Could not load next plan.");
-
-  state.todayBundle = todayBundle;
-  state.previousBundle = previousBundle;
-  state.nextBundle = nextBundle;
-
-  if (todayBundle.user) {
-    state.user = todayBundle.user;
-  }
-
-  await loadHistory();
+  await bootstrapApp(state.user.email, state.user.display_name || "", { preferFresh: true });
 }
 
 async function refreshTodayAndNextOnly() {
@@ -218,25 +256,23 @@ async function refreshTodayAndNextOnly() {
 
   state.todayBundle = todayBundle;
   state.nextBundle = nextBundle;
-}
 
-async function refreshNextOnly() {
-  if (!state.user?.email) return;
-
-  const email = state.user.email;
-  const nextPlanDate = state.nextPlanDate || getNextActiveDate(state.todayYmd, state.settings.active_days);
-
-  const nextBundle = await apiGet("getTodayPlan", { email, plan_date: nextPlanDate });
-
-  if (!nextBundle.ok) throw new Error(nextBundle.error || "Could not load next plan.");
-
-  state.nextBundle = nextBundle;
+  writeBootstrapCache(email, {
+    user: state.user,
+    settings: state.settings,
+    todayYmd: state.todayYmd,
+    nextPlanDate: state.nextPlanDate,
+    todayBundle: state.todayBundle,
+    previousBundle: state.previousBundle,
+    nextBundle: state.nextBundle
+  });
 }
 
 async function loadHistory() {
   const email = state.user?.email;
   if (!email) {
     state.historyBundles = [];
+    state.historyLoaded = true;
     return;
   }
 
@@ -252,6 +288,34 @@ async function loadHistory() {
   state.historyBundles = bundles
     .filter(bundle => bundle.ok && bundle.has_plan)
     .sort((a, b) => String(b.plan_date).localeCompare(String(a.plan_date)));
+
+  state.historyLoaded = true;
+}
+
+async function loadHistoryInBackground(forceRender) {
+  try {
+    await loadHistory();
+    if (forceRender || state.activeTab === "history") {
+      renderHistoryTab();
+    }
+  } catch (err) {
+    console.error("History load failed", err);
+    if (forceRender || state.activeTab === "history") {
+      mainView.innerHTML = `
+        <section class="card hero">
+          <div class="eyebrow">History</div>
+          <h2>Could not load history</h2>
+          <p class="muted">${escapeHtml(err.message || "Please try again.")}</p>
+          <div class="sp16"></div>
+          <button id="retryHistoryBtn" class="btn primary full" type="button">Retry</button>
+        </section>
+      `;
+      document.getElementById("retryHistoryBtn").addEventListener("click", async () => {
+        renderHistoryLoading();
+        await loadHistoryInBackground(true);
+      });
+    }
+  }
 }
 
 function setActiveTab(tab) {
@@ -290,7 +354,11 @@ function renderActiveTab() {
       renderPlanTab();
       break;
     case "history":
-      renderHistoryTab();
+      if (!state.historyLoaded) {
+        renderHistoryLoading();
+      } else {
+        renderHistoryTab();
+      }
       break;
     case "settings":
       renderSettingsTab();
@@ -366,14 +434,14 @@ function renderTodayTab() {
   const tasks = todayBundle.tasks || [];
   const current = todayBundle.current_task;
   const completedCount = tasks.filter(task => toBool(task.completed)).length;
-  const allComplete = completedCount === 6;
+  const allComplete = completedCount === tasks.length && tasks.length > 0;
 
   mainView.innerHTML = `
     <section class="card hero">
       <div class="eyebrow">Today’s Focus</div>
       <h2>${allComplete ? "All priorities complete" : `Priority ${escapeHtml(String(current?.task_rank || ""))}`}</h2>
       <p class="big">${allComplete ? "You completed all six priorities for today." : escapeHtml(current?.task_text || "")}</p>
-      <div class="kpi">${completedCount} of 6 complete</div>
+      <div class="kpi">${completedCount} of ${tasks.length || 6} complete</div>
     </section>
 
     <section class="card">
@@ -1005,6 +1073,16 @@ async function savePlanAndShowPlan(finalTasks, planDate) {
    HISTORY TAB
 ========================= */
 
+function renderHistoryLoading() {
+  mainView.innerHTML = `
+    <section class="card hero center">
+      <div class="eyebrow">History</div>
+      <h2>Loading history...</h2>
+      <p class="muted">Pulling your recent plans.</p>
+    </section>
+  `;
+}
+
 function renderHistoryTab() {
   const bundles = state.historyBundles || [];
 
@@ -1221,7 +1299,6 @@ function renderSettingsTab() {
       };
 
       localStorage.setItem(STORE.USER_NAME, newName);
-
       await refreshAllData();
       renderSettingsSaved();
     } catch (err) {
@@ -1379,7 +1456,7 @@ async function apiGet(action, params = {}) {
   const url = new URL(API_BASE);
   url.searchParams.set("action", action);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), { cache: "no-store" });
   return await res.json();
 }
 
